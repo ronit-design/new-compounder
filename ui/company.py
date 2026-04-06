@@ -371,12 +371,14 @@ def render_company(ticker, company):
 
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown('<span class="section-label">Historical</span>', unsafe_allow_html=True)
+        _wc_n = min(len(bs_years), len(dso_list), len(inv_list),
+                    len(dpo_list), len(ccc_list), len(nwc_list))
         wc_display = pd.DataFrame({
             "Metric": ["DSO", "Inventory Days", "DPO", "Cash Cycle", "NWC"],
             **{bs_years[i]: [
                 fmt_days(dso_list[i]), fmt_days(inv_list[i]), fmt_days(dpo_list[i]),
                 fmt_days(ccc_list[i]), fmt_currency(nwc_list[i], ccy),
-            ] for i in range(len(bs_years))}
+            ] for i in range(_wc_n)}
         }).set_index("Metric")
         st.dataframe(wc_display, use_container_width=True)
 
