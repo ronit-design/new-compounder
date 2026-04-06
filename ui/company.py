@@ -483,13 +483,16 @@ def render_company(ticker, company):
                             unsafe_allow_html=True)
 
         if _fetch_btn:
-            with st.spinner("Fetching XBRL data from EDGAR..."):
-                _fetched = fetch_rsu_tax_xbrl(ticker)
-            st.session_state[rsu_cache_key] = _fetched
-            if _fetched:
-                st.success(f"Found RSU tax data for {len(_fetched)} years: {', '.join(sorted(_fetched.keys()))}")
-            else:
-                st.warning("No RSU tax withholding data found on EDGAR.")
+            try:
+                with st.spinner("Fetching XBRL data from EDGAR..."):
+                    _fetched = fetch_rsu_tax_xbrl(ticker)
+                st.session_state[rsu_cache_key] = _fetched
+                if _fetched:
+                    st.success(f"Found RSU tax data for {len(_fetched)} years: {', '.join(sorted(_fetched.keys()))}")
+                else:
+                    st.warning("No RSU tax withholding data found on EDGAR for this ticker.")
+            except Exception as e:
+                st.error(f"EDGAR fetch failed: {e}")
             st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)

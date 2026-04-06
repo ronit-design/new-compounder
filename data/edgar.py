@@ -66,7 +66,6 @@ def edgar_list_annual_filings(cik, n=5):
 
 # ── XBRL data ─────────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=86400, show_spinner=False)
 def fetch_rsu_tax_xbrl(ticker):
     cik = edgar_get_cik(ticker)
     if not cik:
