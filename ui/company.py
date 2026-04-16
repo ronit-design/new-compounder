@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from config import (C_ACCENT, C_DOWN, C_UP, C_BORDER, C_BORDER2,
-                    C_TEXT, C_TEXT3, CHART_BASE)
+                    C_TEXT, C_TEXT3, CHART_BASE, LINE_COLORS)
 from data.fetchers import (fetch_fundamental, fetch_prices,
                             fetch_year_end_price, fetch_annual_average_prices,
                             fetch_last_4_transcripts, format_financials_for_prompt)
@@ -56,6 +56,8 @@ def render_company(ticker, company):
     eps_s    = align(safe(inc, "diluted_eps", "eps"), n)
     shares_s = align(safe(inc, "is_sh_for_diluted_eps", "is_avg_num_sh_for_eps"), n)
     cogs_s   = align(safe(inc, "is_cogs", "is_cog_and_services_sold"), n)
+    rnd_s    = align(safe(inc, "is_research_and_development"), n)
+    sga_s    = align(safe(inc, "is_selling_general_admin"), n)
 
     price_series, price_years = fetch_year_end_price(ticker, fe_month)
     price_s = pd.Series([
@@ -75,6 +77,8 @@ def render_company(ticker, company):
     decr_cap_s = _cf("cf_decr_cap_stock")
     rsu_tax_s  = _cf("cf_taxes_related_to_net_share_settlement", "cf_taxes_net_share_settlement",
                       "cf_payment_for_taxes_net_share_settlement", "cf_employee_withholding_taxes")
+    capex_s    = _cf("cf_capital_expenditure", "cf_capex")
+    div_s      = _cf("cf_dividends_paid", "cf_common_dividends")
 
     bs_years = bs["Date"].dt.year.astype(str).tolist() if not bs.empty and "Date" in bs.columns else years
     n_bs  = len(bs) if not bs.empty else 0
@@ -120,23 +124,82 @@ def render_company(ticker, company):
 
     # ── Tab 1: Revenue ─────────────────────────────────────────────────────────
     with tab1:
+        def _cagr(s, periods):
+            vals = [v for v in s.dropna().tolist() if v is not None and v > 0]
+            if len(vals) <= periods: return None
+            return ((vals[-1] / vals[-(periods + 1)]) ** (1.0 / periods) - 1) * 100
+
+        def _fmt_cagr_r(v):
+            if v is None: return "—"
+            return f"+{v:.1f}%" if v >= 0 else f"{v:.1f}%"
+
+        rev_3yr = _cagr(rev_s, 3)
+        rev_5yr = _cagr(rev_s, 5)
+        gp_l    = latest(gp_s)
+        gp_p    = prev(gp_s)
+
+        rk1, rk2, rk3, rk4, rk5, rk6 = st.columns(6)
+        kpi_block(rk1, "Revenue",      fmt_currency(rev_l, ccy),        yoy(rev_l, rev_p))
+        kpi_block(rk2, "3yr Rev CAGR", _fmt_cagr_r(rev_3yr))
+        kpi_block(rk3, "5yr Rev CAGR", _fmt_cagr_r(rev_5yr))
+        kpi_block(rk4, "Gross Profit", fmt_currency(gp_l, ccy),         yoy(gp_l, gp_p))
+        kpi_block(rk5, "Gross Margin", fmt_pct(latest(gm_s)))
+        kpi_block(rk6, "Net Income",   fmt_currency(latest(ni_s), ccy), yoy(latest(ni_s), prev(ni_s)))
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Revenue + Revenue Growth
         c1, c2 = st.columns(2, gap="large")
         with c1:
-            vals_b = [v/1e9 if v and not pd.isna(v) else None for v in rev_s]
-            st.plotly_chart(make_bar(years, vals_b, "Revenue  ($B)", height=260),
-                            use_container_width=True, config={"displayModeBar": False})
+            vals_b  = [v/1e9 if v and not pd.isna(v) else None for v in rev_s]
+            fig_rev = make_bar(years, vals_b, f"Revenue  ({ccy_code}, B)", height=260)
+            fig_rev.update_layout(yaxis=dict(tickprefix=ccy, ticksuffix="B", showgrid=True,
+                                             gridcolor=C_BORDER2, tickfont=dict(size=10, color=C_TEXT3),
+                                             zeroline=False, showline=True, linecolor=C_BORDER))
+            st.plotly_chart(fig_rev, use_container_width=True, config={"displayModeBar": False})
         with c2:
             st.plotly_chart(make_bar(years, rev_growth, "Revenue Growth  (%)", height=260, color="#555555"),
                             use_container_width=True, config={"displayModeBar": False})
 
         st.markdown("<br>", unsafe_allow_html=True)
+
+        # Gross Profit + Gross Profit Growth
+        gp_raw    = gp_s.tolist()
+        gp_growth = [None] + [
+            (gp_raw[i] - gp_raw[i-1]) / abs(gp_raw[i-1]) * 100
+            if (gp_raw[i] is not None and not pd.isna(gp_raw[i]) and
+                gp_raw[i-1] is not None and not pd.isna(gp_raw[i-1]) and gp_raw[i-1] != 0)
+            else None
+            for i in range(1, len(gp_raw))
+        ]
         c3, c4 = st.columns(2, gap="large")
         with c3:
-            ni_b = [v/1e9 if v and not pd.isna(v) else None for v in ni_s]
-            st.plotly_chart(make_bar(years, ni_b, "Net Income  ($B)", height=260),
-                            use_container_width=True, config={"displayModeBar": False})
+            gp_b = [v/1e9 if v is not None and not pd.isna(v) else None for v in gp_s]
+            if any(v is not None for v in gp_b):
+                fig_gp = make_bar(years, gp_b, f"Gross Profit  ({ccy_code}, B)", height=260)
+                fig_gp.update_layout(yaxis=dict(tickprefix=ccy, ticksuffix="B", showgrid=True,
+                                                 gridcolor=C_BORDER2, tickfont=dict(size=10, color=C_TEXT3),
+                                                 zeroline=False, showline=True, linecolor=C_BORDER))
+                st.plotly_chart(fig_gp, use_container_width=True, config={"displayModeBar": False})
+            else:
+                st.markdown('<span style="color:#999;font-size:0.82rem">No gross profit data.</span>',
+                            unsafe_allow_html=True)
         with c4:
-            st.plotly_chart(make_bar(years, eps_s.tolist(), "EPS  ($)", height=260, color="#555555"),
+            if any(v is not None for v in gp_growth):
+                st.plotly_chart(make_bar(years, gp_growth, "Gross Profit Growth  (%)",
+                                         height=260, color="#555555"),
+                                use_container_width=True, config={"displayModeBar": False})
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Net Income + EPS
+        c5, c6 = st.columns(2, gap="large")
+        with c5:
+            ni_b = [v/1e9 if v and not pd.isna(v) else None for v in ni_s]
+            st.plotly_chart(make_bar(years, ni_b, f"Net Income  ({ccy_code}, B)", height=260),
+                            use_container_width=True, config={"displayModeBar": False})
+        with c6:
+            st.plotly_chart(make_bar(years, eps_s.tolist(), "EPS  (diluted)", height=260, color="#555555"),
                             use_container_width=True, config={"displayModeBar": False})
 
     # ── Tab 2: Margins ─────────────────────────────────────────────────────────
@@ -145,56 +208,286 @@ def render_company(ticker, company):
         opm_pct = to_pct_list(opm_s)
         npm_pct = to_pct_list(npm_s)
 
+        # KPI row
+        mk1, mk2, mk3 = st.columns(3)
+        kpi_block(mk1, "Gross Margin",     fmt_pct(latest(gm_s)))
+        kpi_block(mk2, "Operating Margin", fmt_pct(latest(opm_s)))
+        kpi_block(mk3, "Net Margin",       fmt_pct(latest(npm_s)))
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
         fig_mg = make_line(years, [gm_pct, opm_pct, npm_pct],
-                           ["Gross", "Operating", "Net"], "Profit Margins  (%)", height=340, suffix="%")
+                           ["Gross", "Operating", "Net"], "Profit Margins  (%)", height=320, suffix="%")
         fig_mg.update_layout(yaxis=dict(ticksuffix="%", showgrid=True, gridcolor=C_BORDER2,
                                         tickfont=dict(size=10, color=C_TEXT3), zeroline=False, showline=False))
         st.plotly_chart(fig_mg, use_container_width=True, config={"displayModeBar": False})
 
         st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<span class="section-label">Cost Structure</span>', unsafe_allow_html=True)
+
+        def _pct_rev(s_data, i):
+            try:
+                rv = float(rev_s.iloc[i]); vv = float(s_data.iloc[i])
+                if pd.isna(rv) or pd.isna(vv) or rv == 0: return None
+                return abs(vv) / rv * 100
+            except: return None
+
+        rnd_pct = [_pct_rev(rnd_s, i) for i in range(n)]
+        sga_pct = [_pct_rev(sga_s, i) for i in range(n)]
+        has_rnd = any(v is not None for v in rnd_pct)
+        has_sga = any(v is not None for v in sga_pct)
+
+        if has_rnd or has_sga:
+            cost_tr = []
+            if has_rnd:
+                cost_tr.append(go.Bar(name="R&D", x=years, y=rnd_pct,
+                                      marker_color=C_ACCENT, marker_line_width=0,
+                                      hovertemplate="%{x}: %{y:.1f}%<extra></extra>"))
+            if has_sga:
+                cost_tr.append(go.Bar(name="SG&A", x=years, y=sga_pct,
+                                      marker_color="#AAAAAA", marker_line_width=0,
+                                      hovertemplate="%{x}: %{y:.1f}%<extra></extra>"))
+            fig_cost = go.Figure(data=cost_tr)
+            fig_cost.update_layout(**CHART_BASE)
+            fig_cost.update_layout(
+                height=260, barmode="group", bargap=0.35, bargroupgap=0.08,
+                title=dict(text="R&D and SG&A as % of Revenue",
+                           font=dict(size=11, color=C_TEXT3, weight=500), x=0),
+                legend=dict(orientation="h", y=1.12, x=0, font=dict(size=10)),
+                yaxis=dict(ticksuffix="%", showgrid=True, gridcolor=C_BORDER2,
+                           tickfont=dict(size=10, color=C_TEXT3), zeroline=False),
+            )
+            st.plotly_chart(fig_cost, use_container_width=True, config={"displayModeBar": False})
+        else:
+            st.markdown('<span style="color:#999;font-size:0.82rem">R&D / SG&A not available for this ticker.</span>',
+                        unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<span class="section-label">Incremental Margins</span>', unsafe_allow_html=True)
+        st.markdown(
+            '<div style="font-size:0.75rem;color:#777;margin-bottom:0.8rem">'
+            'Profit earned on each additional dollar of revenue — measures operating leverage quality. '
+            'A consistently high incremental operating margin signals the business scales efficiently.'
+            '</div>', unsafe_allow_html=True)
+
+        rev_lv = rev_s.tolist(); gp_lv = gp_s.tolist(); oi_lv = oi_s.tolist()
+
+        def _inc(num_list, den_list, i):
+            if i == 0: return None
+            try:
+                dn = float(num_list[i]); dp = float(num_list[i-1])
+                rn = float(den_list[i]); rp = float(den_list[i-1])
+                if any(pd.isna(v) for v in [dn, dp, rn, rp]): return None
+                dr = rn - rp
+                return (dn - dp) / dr * 100 if abs(dr) > 1e-6 else None
+            except: return None
+
+        inc_gm = [_inc(gp_lv, rev_lv, i) for i in range(n)]
+        inc_om = [_inc(oi_lv, rev_lv, i) for i in range(n)]
+
+        if any(v is not None for v in inc_gm) or any(v is not None for v in inc_om):
+            inc_tr = []
+            if any(v is not None for v in inc_gm):
+                inc_tr.append(go.Bar(name="Incr. Gross Margin", x=years, y=inc_gm,
+                                     marker_color=C_ACCENT, marker_line_width=0,
+                                     hovertemplate="%{x}: %{y:.1f}%<extra></extra>"))
+            if any(v is not None for v in inc_om):
+                inc_tr.append(go.Bar(name="Incr. Operating Margin", x=years, y=inc_om,
+                                     marker_color="#555555", marker_line_width=0,
+                                     hovertemplate="%{x}: %{y:.1f}%<extra></extra>"))
+            fig_inc = go.Figure(data=inc_tr)
+            fig_inc.update_layout(**CHART_BASE)
+            fig_inc.update_layout(
+                height=280, barmode="group", bargap=0.35, bargroupgap=0.08,
+                title=dict(text="Incremental Margins  (%)",
+                           font=dict(size=11, color=C_TEXT3, weight=500), x=0),
+                legend=dict(orientation="h", y=1.12, x=0, font=dict(size=10)),
+                yaxis=dict(ticksuffix="%", showgrid=True, gridcolor=C_BORDER2,
+                           tickfont=dict(size=10, color=C_TEXT3),
+                           zeroline=True, zerolinecolor=C_BORDER),
+            )
+            st.plotly_chart(fig_inc, use_container_width=True, config={"displayModeBar": False})
+
+        st.markdown("<br>", unsafe_allow_html=True)
         st.markdown('<span class="section-label">Historical</span>', unsafe_allow_html=True)
+        margin_rows = {
+            "Gross Margin":       [f"{v:.1f}%" if v is not None else "—" for v in gm_pct],
+            "Operating Margin":   [f"{v:.1f}%" if v is not None else "—" for v in opm_pct],
+            "Net Margin":         [f"{v:.1f}%" if v is not None else "—" for v in npm_pct],
+            "R&D % Revenue":      [f"{v:.1f}%" if v is not None else "—" for v in rnd_pct],
+            "SG&A % Revenue":     [f"{v:.1f}%" if v is not None else "—" for v in sga_pct],
+            "Incr. Gross Margin": [f"{v:.1f}%" if v is not None else "—" for v in inc_gm],
+            "Incr. Op. Margin":   [f"{v:.1f}%" if v is not None else "—" for v in inc_om],
+        }
         margin_df = pd.DataFrame({
-            "Metric": ["Gross Margin", "Operating Margin", "Net Margin"],
-            **{y: [
-                f"{gm_pct[i]:.1f}%"  if gm_pct[i]  else "—",
-                f"{opm_pct[i]:.1f}%" if opm_pct[i] else "—",
-                f"{npm_pct[i]:.1f}%" if npm_pct[i] else "—",
-            ] for i, y in enumerate(years)}
+            "Metric": list(margin_rows.keys()),
+            **{years[i]: [margin_rows[m][i] for m in margin_rows] for i in range(len(years))}
         }).set_index("Metric")
         st.dataframe(margin_df, use_container_width=True)
 
     # ── Tab 3: Cash Flow ───────────────────────────────────────────────────────
     with tab3:
+        def _sv(s, i):
+            try:
+                v = float(s.iloc[i]); return None if pd.isna(v) else v
+            except: return None
+
+        capex_abs  = [abs(_sv(capex_s, i)) if _sv(capex_s, i) is not None else None for i in range(n)]
+        div_abs    = [abs(_sv(div_s,   i)) if _sv(div_s,   i) is not None else None for i in range(n)]
+
+        decr_v2    = pd.to_numeric(decr_cap_s, errors="coerce").abs().reset_index(drop=True)
+        incr_v2    = pd.to_numeric(incr_cap_s, errors="coerce").abs().reset_index(drop=True)
+        both_m2    = decr_v2.isna() & incr_v2.isna()
+        buyback_v  = (decr_v2.fillna(0) - incr_v2.fillna(0)).where(~both_m2)
+        buyback_l  = [max(0.0, float(v)) if not pd.isna(v) else None for v in buyback_v]
+
+        # KPI row
+        l_fcf   = latest(fcf_s); l_cfo = latest(cfo_s); l_ni = latest(ni_s)
+        l_capex = next((v for v in reversed(capex_abs) if v is not None), None)
+        l_rev   = latest(rev_s);  l_sh  = latest(shares_s)
+        fcf_conv   = l_fcf / l_ni * 100    if (l_fcf and l_ni and l_ni > 0)           else None
+        fcf_ps_val = l_fcf / l_sh          if (l_fcf and l_sh and l_sh > 0)           else None
+        capex_int  = l_capex / l_rev * 100 if (l_capex and l_rev and l_rev > 0)       else None
+        reinvest   = l_capex / l_cfo * 100 if (l_capex and l_cfo and l_cfo > 0)       else None
+
+        def _fp(v): return f"{v:.1f}%" if v is not None else "—"
+
+        ck1, ck2, ck3, ck4, ck5 = st.columns(5)
+        kpi_block(ck1, "Free Cash Flow",    fmt_currency(l_fcf, ccy),   yoy(l_fcf, prev(fcf_s)))
+        kpi_block(ck2, "FCF / Share",       fmt_eps(fcf_ps_val, ccy) if fcf_ps_val is not None else "—")
+        kpi_block(ck3, "FCF Conversion",    _fp(fcf_conv))
+        kpi_block(ck4, "Capex / Revenue",   _fp(capex_int))
+        kpi_block(ck5, "Reinvestment Rate", _fp(reinvest))
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # FCF + OCF
         c1, c2 = st.columns(2, gap="large")
         with c1:
             if fcf_s.notna().any():
                 fcf_b   = [v/1e9 if v and not pd.isna(v) else None for v in fcf_s]
-                fig_fcf = make_bar(cf_years, fcf_b, f"Free Cash Flow  ({ccy_code}, B)", height=260)
+                fig_fcf = make_bar(years, fcf_b, f"Free Cash Flow  ({ccy_code}, B)", height=260)
                 fig_fcf.update_layout(yaxis=dict(showgrid=True, gridcolor=C_BORDER2, tickprefix=ccy,
                                                   ticksuffix="B", tickfont=dict(size=10, color=C_TEXT3),
                                                   zeroline=False, showline=True, linecolor=C_BORDER))
                 st.plotly_chart(fig_fcf, use_container_width=True, config={"displayModeBar": False})
             else:
-                st.markdown('<span style="color:#999;font-size:0.82rem">No free cash flow data</span>',
+                st.markdown('<span style="color:#999;font-size:0.82rem">No free cash flow data.</span>',
                             unsafe_allow_html=True)
         with c2:
             if cfo_s.notna().any():
                 cfo_b   = [v/1e9 if v and not pd.isna(v) else None for v in cfo_s]
-                fig_cfo = make_bar(cf_years, cfo_b, f"Operating Cash Flow  ({ccy_code}, B)", height=260, color="#555555")
+                fig_cfo = make_bar(years, cfo_b, f"Operating Cash Flow  ({ccy_code}, B)", height=260, color="#555555")
                 fig_cfo.update_layout(yaxis=dict(showgrid=True, gridcolor=C_BORDER2, tickprefix=ccy,
                                                   ticksuffix="B", tickfont=dict(size=10, color=C_TEXT3),
                                                   zeroline=False, showline=True, linecolor=C_BORDER))
                 st.plotly_chart(fig_cfo, use_container_width=True, config={"displayModeBar": False})
 
-        if fcf_s.notna().any() and ni_s.notna().any():
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Capex (bars + % revenue overlay) + FCF Conversion
+        c3, c4 = st.columns(2, gap="large")
+        with c3:
+            if any(v is not None for v in capex_abs):
+                capex_b     = [v/1e9 if v is not None else None for v in capex_abs]
+                capex_r_pct = [
+                    capex_abs[i] / float(rev_s.iloc[i]) * 100
+                    if (capex_abs[i] is not None and i < len(rev_s)
+                        and pd.notna(rev_s.iloc[i]) and float(rev_s.iloc[i]) > 0)
+                    else None for i in range(n)
+                ]
+                fig_cx = go.Figure()
+                fig_cx.add_trace(go.Bar(
+                    x=years, y=capex_b, name="Capex",
+                    marker_color="#555555", marker_line_width=0, yaxis="y",
+                    hovertemplate="%{x}: " + ccy + "%{y:.2f}B<extra></extra>",
+                ))
+                fig_cx.add_trace(go.Scatter(
+                    x=years, y=capex_r_pct, name="% Revenue",
+                    mode="lines+markers", yaxis="y2",
+                    line=dict(color=C_DOWN, width=1.5, dash="dot"),
+                    hovertemplate="%{x}: %{y:.1f}%<extra></extra>",
+                ))
+                fig_cx.update_layout(**CHART_BASE)
+                fig_cx.update_layout(
+                    height=260,
+                    title=dict(text=f"Capital Expenditure  ({ccy_code}, B)",
+                               font=dict(size=11, color=C_TEXT3, weight=500), x=0),
+                    yaxis=dict(tickprefix=ccy, ticksuffix="B", showgrid=True, gridcolor=C_BORDER2,
+                               tickfont=dict(size=10, color=C_TEXT3), zeroline=False),
+                    yaxis2=dict(overlaying="y", side="right", ticksuffix="%",
+                                tickfont=dict(size=10, color=C_DOWN), zeroline=False, showgrid=False),
+                    legend=dict(orientation="h", y=1.12, x=0, font=dict(size=10)),
+                )
+                st.plotly_chart(fig_cx, use_container_width=True, config={"displayModeBar": False})
+            else:
+                st.markdown('<span style="color:#999;font-size:0.82rem">Capex data not available.</span>',
+                            unsafe_allow_html=True)
+        with c4:
+            fcf_conv_l = [
+                _sv(fcf_s, i) / _sv(ni_s, i) * 100
+                if (_sv(fcf_s, i) is not None and _sv(ni_s, i) and _sv(ni_s, i) > 0) else None
+                for i in range(n)
+            ]
+            if any(v is not None for v in fcf_conv_l):
+                fig_conv = go.Figure(go.Bar(
+                    x=years, y=fcf_conv_l,
+                    marker_color=[C_UP if (v or 0) >= 80 else (C_DOWN if (v or 0) < 50 else "#AAAAAA")
+                                  for v in fcf_conv_l],
+                    marker_line_width=0,
+                    hovertemplate="%{x}: %{y:.1f}%<extra></extra>",
+                ))
+                fig_conv.update_layout(**CHART_BASE)
+                fig_conv.update_layout(
+                    height=260,
+                    title=dict(text="FCF Conversion  (FCF ÷ Net Income, %)",
+                               font=dict(size=11, color=C_TEXT3, weight=500), x=0),
+                    yaxis=dict(ticksuffix="%", showgrid=True, gridcolor=C_BORDER2,
+                               tickfont=dict(size=10, color=C_TEXT3),
+                               zeroline=True, zerolinecolor=C_BORDER),
+                )
+                st.plotly_chart(fig_conv, use_container_width=True, config={"displayModeBar": False})
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Capital Returns (Dividends + Buybacks)
+        has_div = any(v is not None for v in div_abs)
+        has_bb  = any(v is not None for v in buyback_l)
+        if has_div or has_bb:
+            st.markdown('<span class="section-label">Capital Returns</span>', unsafe_allow_html=True)
+            ret_tr = []
+            if has_div:
+                ret_tr.append(go.Bar(name="Dividends", x=years,
+                                     y=[v/1e9 if v is not None else None for v in div_abs],
+                                     marker_color="#AAAAAA", marker_line_width=0,
+                                     hovertemplate="%{x}: " + ccy + "%{y:.2f}B<extra></extra>"))
+            if has_bb:
+                ret_tr.append(go.Bar(name="Net Buybacks", x=years,
+                                     y=[v/1e9 if v is not None else None for v in buyback_l],
+                                     marker_color=C_ACCENT, marker_line_width=0,
+                                     hovertemplate="%{x}: " + ccy + "%{y:.2f}B<extra></extra>"))
+            fig_ret = go.Figure(data=ret_tr)
+            fig_ret.update_layout(**CHART_BASE)
+            fig_ret.update_layout(
+                height=260, barmode="stack", bargap=0.35,
+                title=dict(text=f"Capital Returns to Shareholders  ({ccy_code}, B)",
+                           font=dict(size=11, color=C_TEXT3, weight=500), x=0),
+                legend=dict(orientation="h", y=1.12, x=0, font=dict(size=10)),
+                yaxis=dict(tickprefix=ccy, ticksuffix="B", showgrid=True, gridcolor=C_BORDER2,
+                           tickfont=dict(size=10, color=C_TEXT3), zeroline=False),
+            )
+            st.plotly_chart(fig_ret, use_container_width=True, config={"displayModeBar": False})
             st.markdown("<br>", unsafe_allow_html=True)
+
+        # FCF vs Net Income comparison
+        if fcf_s.notna().any() and ni_s.notna().any():
             min_len = min(len(fcf_s), len(ni_s))
             fig_cmp = make_line(
                 years[-min_len:],
                 [[v/1e9 if v and not pd.isna(v) else None for v in fcf_s.tolist()[-min_len:]],
                  [v/1e9 if v and not pd.isna(v) else None for v in ni_s.tolist()[-min_len:]]],
                 ["Free Cash Flow", "Net Income"],
-                "FCF vs Net Income  ($B)", height=300,
+                f"FCF vs Net Income  ({ccy_code}, B)", height=300,
             )
             st.plotly_chart(fig_cmp, use_container_width=True, config={"displayModeBar": False})
 
@@ -202,7 +495,7 @@ def render_company(ticker, company):
     with tab4:
         if price_s.notna().any():
             fig_px = make_line(years, [price_s.tolist()], ["Price"],
-                               "Year-End Stock Price  ($)", height=300)
+                               f"Year-End Stock Price  ({ccy_code})", height=280)
             fig_px.update_layout(yaxis=dict(tickprefix=ccy, showgrid=True, gridcolor=C_BORDER2,
                                             tickfont=dict(size=10, color=C_TEXT3), zeroline=False,
                                             showline=True, linecolor=C_BORDER))
@@ -216,10 +509,10 @@ def render_company(ticker, company):
                 fig_px = go.Figure(go.Scatter(
                     x=prices["date"], y=prices[close_col], mode="lines", name="Price",
                     line=dict(color=C_ACCENT, width=1.5),
-                    hovertemplate="%{x|%d %b %Y}<br>$%{y:.2f}<extra></extra>",
+                    hovertemplate="%{x|%d %b %Y}<br>" + ccy + "%{y:.2f}<extra></extra>",
                 ))
                 fig_px.update_layout(**CHART_BASE)
-                fig_px.update_layout(height=300, showlegend=False,
+                fig_px.update_layout(height=280, showlegend=False,
                     yaxis=dict(tickprefix=ccy, showgrid=True, gridcolor=C_BORDER2,
                                tickfont=dict(size=10, color=C_TEXT3), zeroline=False,
                                showline=True, linecolor=C_BORDER))
@@ -231,46 +524,155 @@ def render_company(ticker, company):
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown('<span class="section-label">Multiples</span>', unsafe_allow_html=True)
 
-        pe_list, pfcf_list, evebit_list = [], [], []
+        pe_list, pfcf_list, evebit_list, evrev_list, ps_list, peg_list, fcfy_list = (
+            [], [], [], [], [], [], []
+        )
+        eps_vl = eps_s.tolist()
+
         for i in range(len(years)):
             def _g(s):
                 return float(s.iloc[i]) if i < len(s) and pd.notna(s.iloc[i]) else None
-            price = _g(price_s); eps = _g(eps_s); fcf = _g(fcf_s)
-            ebit  = _g(oi_s);    nd  = _g(nd_s);  sh  = _g(shares_s)
+            price = _g(price_s); eps_v = _g(eps_s); fcf_v = _g(fcf_s)
+            ebit  = _g(oi_s);    nd_v  = _g(nd_s);  sh    = _g(shares_s); rev_v = _g(rev_s)
 
-            try:    pe_list.append(price / eps if price and eps and eps != 0 else None)
-            except: pe_list.append(None)
+            mc  = price * sh   if (price and sh)                    else None
+            ev  = (mc + nd_v)  if (mc is not None and nd_v is not None) else mc
 
-            try:
-                mc = price * sh if price and sh else None
-                pfcf_list.append(mc / fcf if mc and fcf and fcf > 0 else None)
-            except: pfcf_list.append(None)
+            pe_list.append(price / eps_v          if (price and eps_v and eps_v != 0)       else None)
+            pfcf_list.append(mc / fcf_v            if (mc and fcf_v and fcf_v > 0)           else None)
+            evebit_list.append(ev / ebit           if (ev and ebit  and ebit  > 0)           else None)
+            evrev_list.append(ev / rev_v           if (ev and rev_v and rev_v > 0)           else None)
+            ps_list.append(mc / rev_v              if (mc and rev_v and rev_v > 0)           else None)
+            fcfy_list.append(fcf_v / mc * 100      if (fcf_v and mc and mc > 0)              else None)
 
-            try:
-                mc = price * sh if price and sh else None
-                ev = (mc + nd) if mc and nd else mc
-                evebit_list.append(ev / ebit if ev and ebit and ebit > 0 else None)
-            except: evebit_list.append(None)
+            # PEG = P/E ÷ 3yr trailing EPS CAGR
+            peg = None
+            pe_cur = pe_list[-1]
+            if pe_cur and i >= 3:
+                e0 = eps_vl[i-3]; e1 = eps_vl[i]
+                if (e0 and e1 and not pd.isna(e0) and not pd.isna(e1) and e0 > 0 and e1 > 0):
+                    g = ((e1 / e0) ** (1/3) - 1) * 100
+                    peg = pe_cur / g if g > 0 else None
+            peg_list.append(peg)
 
+        # Multiples line chart with ±1σ historical bands
         val_ys, val_names = [], []
-        if any(v for v in pe_list     if v): val_ys.append(pe_list);     val_names.append("P/E")
-        if any(v for v in pfcf_list   if v): val_ys.append(pfcf_list);   val_names.append("P/FCF")
-        if any(v for v in evebit_list if v): val_ys.append(evebit_list); val_names.append("EV/EBIT")
+        for lst, nm in [(pe_list, "P/E"), (pfcf_list, "P/FCF"), (evebit_list, "EV/EBIT"),
+                        (evrev_list, "EV/Revenue"), (ps_list, "P/Sales")]:
+            if any(v for v in lst if v):
+                val_ys.append(lst); val_names.append(nm)
 
         if val_ys:
-            fig_v = make_line(years, val_ys, val_names, "Valuation Multiples", height=300, suffix="x")
-            st.plotly_chart(fig_v, use_container_width=True, config={"displayModeBar": False})
+            def _mean_std(vals):
+                clean = [v for v in vals if v is not None]
+                if len(clean) < 3: return None, None
+                m = sum(clean) / len(clean)
+                s = (sum((v - m) ** 2 for v in clean) / len(clean)) ** 0.5
+                return m, s
 
-            val_display = pd.DataFrame({
-                "Metric": val_names,
-                **{y: [val_ys[j][i] if val_ys[j][i] else None for j in range(len(val_names))]
-                   for i, y in enumerate(years)}
-            }).set_index("Metric")
-            val_display = val_display.map(lambda v: fmt_multiple(v) if v else "—")
-            st.dataframe(val_display, use_container_width=True)
+            band_alphas = ["0.07", "0.08", "0.07", "0.07", "0.07"]
+            band_rgb    = ["17,17,17", "170,170,170", "85,85,85", "17,17,17", "85,85,85"]
+
+            fig_v = go.Figure()
+
+            # ±1σ bands (drawn first so lines sit on top)
+            for j, (lst, nm) in enumerate(zip(val_ys, val_names)):
+                m, s = _mean_std(lst)
+                if m is None: continue
+                upper = [m + s if v is not None else None for v in lst]
+                lower = [m - s if v is not None else None for v in lst]
+                fc    = f"rgba({band_rgb[j % len(band_rgb)]},{band_alphas[j % len(band_alphas)]})"
+                fig_v.add_trace(go.Scatter(x=years, y=upper, mode="lines",
+                                           line=dict(width=0), showlegend=False,
+                                           hoverinfo="skip", legendgroup=nm))
+                fig_v.add_trace(go.Scatter(x=years, y=lower, mode="lines", fill="tonexty",
+                                           fillcolor=fc, line=dict(width=0),
+                                           showlegend=False, hoverinfo="skip", legendgroup=nm))
+
+            # Metric lines
+            for j, (lst, nm) in enumerate(zip(val_ys, val_names)):
+                fig_v.add_trace(go.Scatter(
+                    x=years, y=lst, name=nm, mode="lines",
+                    line=dict(color=LINE_COLORS[j % len(LINE_COLORS)], width=1.5),
+                    hovertemplate=f"%{{x}}<br>{nm}: %{{y:,.1f}}x<extra></extra>",
+                    connectgaps=False, legendgroup=nm,
+                ))
+
+            fig_v.update_layout(**CHART_BASE)
+            fig_v.update_layout(
+                height=320,
+                title=dict(text="Valuation Multiples  (shaded band = ±1σ historical range)",
+                           font=dict(size=11, color=C_TEXT3, weight=500), x=0),
+                yaxis=dict(ticksuffix="x", showgrid=True, gridcolor=C_BORDER2,
+                           tickfont=dict(size=10, color=C_TEXT3), zeroline=False),
+            )
+            st.plotly_chart(fig_v, use_container_width=True, config={"displayModeBar": False})
         else:
             st.markdown('<span style="color:#999;font-size:0.82rem">Stock price required to calculate multiples.</span>',
                         unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # FCF Yield + PEG side by side
+        c_fy, c_pg = st.columns(2, gap="large")
+        with c_fy:
+            if any(v is not None for v in fcfy_list):
+                fig_fy = go.Figure(go.Bar(
+                    x=years, y=fcfy_list,
+                    marker_color=[C_UP if (v or 0) >= 4 else (C_DOWN if (v or 0) < 2 else "#AAAAAA")
+                                  for v in fcfy_list],
+                    marker_line_width=0,
+                    hovertemplate="%{x}: %{y:.1f}%<extra></extra>",
+                ))
+                fig_fy.update_layout(**CHART_BASE)
+                fig_fy.update_layout(
+                    height=240,
+                    title=dict(text="FCF Yield  (FCF ÷ Market Cap, %)",
+                               font=dict(size=11, color=C_TEXT3, weight=500), x=0),
+                    yaxis=dict(ticksuffix="%", showgrid=True, gridcolor=C_BORDER2,
+                               tickfont=dict(size=10, color=C_TEXT3),
+                               zeroline=True, zerolinecolor=C_BORDER),
+                )
+                st.plotly_chart(fig_fy, use_container_width=True, config={"displayModeBar": False})
+            else:
+                st.markdown('<span style="color:#999;font-size:0.82rem">FCF yield requires price + FCF data.</span>',
+                            unsafe_allow_html=True)
+        with c_pg:
+            if any(v is not None for v in peg_list):
+                fig_peg = go.Figure(go.Bar(
+                    x=years, y=peg_list,
+                    marker_color=[C_UP if (v or 99) <= 1.0 else (C_DOWN if (v or 0) > 2.0 else "#AAAAAA")
+                                  for v in peg_list],
+                    marker_line_width=0,
+                    hovertemplate="%{x}: %{y:.2f}x<extra></extra>",
+                ))
+                fig_peg.update_layout(**CHART_BASE)
+                fig_peg.update_layout(
+                    height=240,
+                    title=dict(text="PEG Ratio  (P/E ÷ 3yr EPS CAGR)",
+                               font=dict(size=11, color=C_TEXT3, weight=500), x=0),
+                    yaxis=dict(ticksuffix="x", showgrid=True, gridcolor=C_BORDER2,
+                               tickfont=dict(size=10, color=C_TEXT3),
+                               zeroline=True, zerolinecolor=C_BORDER),
+                )
+                st.plotly_chart(fig_peg, use_container_width=True, config={"displayModeBar": False})
+            else:
+                st.markdown('<span style="color:#999;font-size:0.82rem">PEG requires 4+ years of positive EPS data.</span>',
+                            unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<span class="section-label">Historical Multiples</span>', unsafe_allow_html=True)
+
+        all_m = [(pe_list, "P/E", "x"), (pfcf_list, "P/FCF", "x"), (evebit_list, "EV/EBIT", "x"),
+                 (evrev_list, "EV/Revenue", "x"), (ps_list, "P/Sales", "x"),
+                 (peg_list, "PEG", "x"), (fcfy_list, "FCF Yield", "%")]
+        tbl_rows = {nm: [f"{v:.2f}{sfx}" if v is not None else "—" for v in lst]
+                    for lst, nm, sfx in all_m}
+        val_df = pd.DataFrame({
+            "Metric": list(tbl_rows.keys()),
+            **{years[i]: [tbl_rows[m][i] for m in tbl_rows] for i in range(len(years))}
+        }).set_index("Metric")
+        st.dataframe(val_df, use_container_width=True)
 
     # ── Tab 5: Working Capital ─────────────────────────────────────────────────
     with tab5:
