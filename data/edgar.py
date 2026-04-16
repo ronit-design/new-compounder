@@ -76,64 +76,64 @@ _CUSTOM_RSU_CONCEPTS = [
 
 def _fetch_rsu_xbrl_instance(cik: str) -> dict:
     """Fallback: parse the raw XBRL instance document for custom-namespace RSU concepts."""
-    try:
-        acc, _ = edgar_latest_filing(cik, "10-K")
-        if not acc:
-            acc, _ = edgar_latest_filing(cik, "20-F")
-        if not acc:
-            return {}
+    acc, _ = edgar_latest_filing(cik, "10-K")
+    if not acc:
+        acc, _ = edgar_latest_filing(cik, "20-F")
+    if not acc:
+        raise ValueError(f"No 10-K/20-F filing found for CIK {cik}")
 
-        acc_dashes = f"{acc[:10]}-{acc[10:12]}-{acc[12:]}"
-        cik_int    = int(cik)
-        idx_url    = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc}/{acc_dashes}-index.htm"
-        r_idx      = requests.get(idx_url, headers=_HDRS, timeout=15)
-        if not r_idx.ok:
-            return {}
+    acc_dashes = f"{acc[:10]}-{acc[10:12]}-{acc[12:]}"
+    cik_int    = int(cik)
+    idx_url    = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc}/{acc_dashes}-index.htm"
+    r_idx      = requests.get(idx_url, headers=_HDRS, timeout=15)
+    if not r_idx.ok:
+        raise ValueError(f"Filing index fetch failed: HTTP {r_idx.status_code} for {idx_url}")
 
-        xml_links = re.findall(r'href="(/Archives[^"]+_htm\.xml)"', r_idx.text, re.IGNORECASE)
-        if not xml_links:
-            return {}
+    xml_links = re.findall(r'href="(/Archives[^"]+_htm\.xml)"', r_idx.text, re.IGNORECASE)
+    if not xml_links:
+        raise ValueError(f"No _htm.xml XBRL instance document found in filing index for {acc_dashes}")
 
-        r_xml = requests.get("https://www.sec.gov" + xml_links[0], headers=_HDRS, timeout=60)
-        if not r_xml.ok:
-            return {}
+    r_xml = requests.get("https://www.sec.gov" + xml_links[0], headers=_HDRS, timeout=60)
+    if not r_xml.ok:
+        raise ValueError(f"XBRL instance fetch failed: HTTP {r_xml.status_code} for {xml_links[0]}")
 
-        text = r_xml.text
+    text = r_xml.text
 
-        # Build context map: id -> fiscal year (annual periods only)
-        ctx_map = {}
-        for ctx_m in re.finditer(r'<(?:\w+:)?context\s[^>]*id="([^"]+)"[^>]*>(.*?)</(?:\w+:)?context>', text, re.DOTALL):
-            ctx_id    = ctx_m.group(1)
-            ctx_block = ctx_m.group(2)
-            start_m   = re.search(r'<(?:\w+:)?startDate>(\d{4})-(\d{2})-\d{2}', ctx_block)
-            end_m     = re.search(r'<(?:\w+:)?endDate>(\d{4})-\d{2}-\d{2}',     ctx_block)
-            if start_m and end_m:
-                sy, sm = int(start_m.group(1)), int(start_m.group(2))
-                ey     = int(end_m.group(1))
-                if ey - sy == 1 or (ey == sy and sm == 1):  # annual period
-                    ctx_map[ctx_id] = str(ey)
+    # Build context map: id -> fiscal year (annual periods only)
+    ctx_map = {}
+    for ctx_m in re.finditer(r'<(?:\w+:)?context\s[^>]*id="([^"]+)"[^>]*>(.*?)</(?:\w+:)?context>', text, re.DOTALL):
+        ctx_id    = ctx_m.group(1)
+        ctx_block = ctx_m.group(2)
+        start_m   = re.search(r'<(?:\w+:)?startDate>(\d{4})-(\d{2})-\d{2}', ctx_block)
+        end_m     = re.search(r'<(?:\w+:)?endDate>(\d{4})-\d{2}-\d{2}',     ctx_block)
+        if start_m and end_m:
+            sy, sm = int(start_m.group(1)), int(start_m.group(2))
+            ey     = int(end_m.group(1))
+            if ey - sy == 1 or (ey == sy and sm == 1):  # annual period
+                ctx_map[ctx_id] = str(ey)
 
-        results = {}
-        for concept in _CUSTOM_RSU_CONCEPTS:
-            for m in re.finditer(
-                rf'<\w+:{re.escape(concept)}\s[^>]*contextRef="([^"]+)"[^>]*>([^<]+)</',
-                text,
-            ):
-                ctx_ref, val = m.group(1), m.group(2)
-                year = ctx_map.get(ctx_ref)
-                if year and year not in results:
-                    try:
-                        results[year] = abs(float(val))
-                    except ValueError:
-                        pass
+    if not ctx_map:
+        raise ValueError(f"Could not parse any annual contexts from XBRL instance ({len(text)} chars)")
 
-        if results:
-            # Flag that this is a net figure (withholding minus option proceeds),
-            # not gross withholding — affects companies like Alphabet/Google.
-            results["_net_figure"] = True
-        return results
-    except Exception:
-        return {}
+    results = {}
+    for concept in _CUSTOM_RSU_CONCEPTS:
+        for m in re.finditer(
+            rf'<\w+:{re.escape(concept)}\s[^>]*contextRef="([^"]+)"[^>]*>([^<]+)</',
+            text,
+        ):
+            ctx_ref, val = m.group(1), m.group(2)
+            year = ctx_map.get(ctx_ref)
+            if year and year not in results:
+                try:
+                    results[year] = abs(float(val))
+                except ValueError:
+                    pass
+
+    if results:
+        # Flag that this is a net figure (withholding minus option proceeds),
+        # not gross withholding — affects companies like Alphabet/Google.
+        results["_net_figure"] = True
+    return results
 
 
 def fetch_rsu_tax_xbrl(ticker):
@@ -163,8 +163,8 @@ def fetch_rsu_tax_xbrl(ticker):
             return results
         # Standard concept returned nothing — try custom-namespace XBRL instance fallback
         return _fetch_rsu_xbrl_instance(cik)
-    except Exception:
-        return {}
+    except Exception as e:
+        raise RuntimeError(f"RSU XBRL fetch failed for {ticker}: {e}") from e
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
