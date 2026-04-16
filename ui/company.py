@@ -478,7 +478,9 @@ def render_company(ticker, company):
                             unsafe_allow_html=True)
             elif sec_rsu:
                 years_found = sorted(sec_rsu.keys())
-                st.markdown(f'<span style="font-size:0.72rem;color:{C_UP}">XBRL data loaded for: {", ".join(years_found)}</span>',
+                _is_net_loaded = st.session_state.get(f"{rsu_cache_key}_net", False)
+                _net_note = " (net figure — withholding minus option proceeds)" if _is_net_loaded else ""
+                st.markdown(f'<span style="font-size:0.72rem;color:{C_UP}">XBRL data loaded for: {", ".join(years_found)}{_net_note}</span>',
                             unsafe_allow_html=True)
             else:
                 st.markdown('<span style="font-size:0.72rem;color:#999">RSU tax withholdings not yet fetched — click to pull from EDGAR XBRL data.</span>',
@@ -488,9 +490,21 @@ def render_company(ticker, company):
             try:
                 with st.spinner("Fetching XBRL data from EDGAR..."):
                     _fetched = fetch_rsu_tax_xbrl(ticker)
+                _is_net = _fetched.pop("_net_figure", False)
                 st.session_state[rsu_cache_key] = _fetched
+                st.session_state[f"{rsu_cache_key}_net"] = _is_net
                 if _fetched:
-                    st.success(f"Found RSU tax data for {len(_fetched)} years: {', '.join(sorted(_fetched.keys()))}")
+                    years_str = ", ".join(sorted(_fetched.keys()))
+                    if _is_net:
+                        st.success(f"Found data for {len(_fetched)} years: {years_str}")
+                        st.info(
+                            "This company reports **net payments related to stock-based award activities** "
+                            "(RSU tax withholdings net of stock option exercise proceeds). "
+                            "The net figure is used as a proxy — gross withholding will be slightly higher.",
+                            icon="ℹ️",
+                        )
+                    else:
+                        st.success(f"Found RSU tax data for {len(_fetched)} years: {years_str}")
                 else:
                     st.warning("No RSU tax withholding data found on EDGAR for this ticker.")
             except Exception as e:

@@ -66,6 +66,76 @@ def edgar_list_annual_filings(cik, n=5):
 
 # ── XBRL data ─────────────────────────────────────────────────────────────────
 
+# Custom-namespace RSU/SBC cash-flow concepts by company.
+# These are company-specific XBRL extensions not exposed via the standard
+# companyfacts API (which only serves us-gaap: and dei: namespaces).
+_CUSTOM_RSU_CONCEPTS = [
+    "NetProceedsPaymentsRelatedToStockBasedAwardActivities",  # Alphabet/Google (goog:)
+]
+
+
+def _fetch_rsu_xbrl_instance(cik: str) -> dict:
+    """Fallback: parse the raw XBRL instance document for custom-namespace RSU concepts."""
+    try:
+        acc, _ = edgar_latest_filing(cik, "10-K")
+        if not acc:
+            acc, _ = edgar_latest_filing(cik, "20-F")
+        if not acc:
+            return {}
+
+        acc_dashes = f"{acc[:10]}-{acc[10:12]}-{acc[12:]}"
+        cik_int    = int(cik)
+        idx_url    = f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{acc}/{acc_dashes}-index.htm"
+        r_idx      = requests.get(idx_url, headers=_HDRS, timeout=15)
+        if not r_idx.ok:
+            return {}
+
+        xml_links = re.findall(r'href="(/Archives[^"]+_htm\.xml)"', r_idx.text, re.IGNORECASE)
+        if not xml_links:
+            return {}
+
+        r_xml = requests.get("https://www.sec.gov" + xml_links[0], headers=_HDRS, timeout=60)
+        if not r_xml.ok:
+            return {}
+
+        text = r_xml.text
+
+        # Build context map: id -> fiscal year (annual periods only)
+        ctx_map = {}
+        for ctx_m in re.finditer(r'<(?:\w+:)?context\s[^>]*id="([^"]+)"[^>]*>(.*?)</(?:\w+:)?context>', text, re.DOTALL):
+            ctx_id    = ctx_m.group(1)
+            ctx_block = ctx_m.group(2)
+            start_m   = re.search(r'<(?:\w+:)?startDate>(\d{4})-(\d{2})-\d{2}', ctx_block)
+            end_m     = re.search(r'<(?:\w+:)?endDate>(\d{4})-\d{2}-\d{2}',     ctx_block)
+            if start_m and end_m:
+                sy, sm = int(start_m.group(1)), int(start_m.group(2))
+                ey     = int(end_m.group(1))
+                if ey - sy == 1 or (ey == sy and sm == 1):  # annual period
+                    ctx_map[ctx_id] = str(ey)
+
+        results = {}
+        for concept in _CUSTOM_RSU_CONCEPTS:
+            for m in re.finditer(
+                rf'<\w+:{re.escape(concept)}\s[^>]*contextRef="([^"]+)"[^>]*>([^<]+)</',
+                text,
+            ):
+                ctx_ref, val = m.group(1), m.group(2)
+                year = ctx_map.get(ctx_ref)
+                if year and year not in results:
+                    try:
+                        results[year] = abs(float(val))
+                    except ValueError:
+                        pass
+
+        if results:
+            # Flag that this is a net figure (withholding minus option proceeds),
+            # not gross withholding — affects companies like Alphabet/Google.
+            results["_net_figure"] = True
+        return results
+    except Exception:
+        return {}
+
+
 def fetch_rsu_tax_xbrl(ticker):
     cik = edgar_get_cik(ticker)
     if not cik:
@@ -89,7 +159,10 @@ def fetch_rsu_tax_xbrl(ticker):
                 if year not in filed_at or filed > filed_at[year]:
                     results[year]  = abs(float(val))
                     filed_at[year] = filed
-        return results
+        if results:
+            return results
+        # Standard concept returned nothing — try custom-namespace XBRL instance fallback
+        return _fetch_rsu_xbrl_instance(cik)
     except Exception:
         return {}
 
@@ -175,10 +248,13 @@ def edgar_fetch_item8_notes(cik, accession_no_dashes, max_chars=14000):
         doc_url = None
         if r_idx.ok:
             for row in re.findall(r'<tr[^>]*>.*?</tr>', r_idx.text, re.DOTALL | re.IGNORECASE):
-                hm = re.search(r'href="(/Archives[^"]+\.htm)"', row, re.IGNORECASE)
+                hm = re.search(r'href="(/(?:ix\?doc=)?/Archives[^"]+\.htm)"', row, re.IGNORECASE)
+                if not hm:
+                    hm = re.search(r'href="(/Archives[^"]+\.htm)"', row, re.IGNORECASE)
                 tm = re.search(r'<td[^>]*>\s*(10-K|20-F|FORM 10-K|FORM 20-F)\s*</td>', row, re.IGNORECASE)
                 if hm and tm:
-                    doc_url = "https://www.sec.gov" + hm.group(1)
+                    path = re.sub(r'^/ix\?doc=', '', hm.group(1))
+                    doc_url = "https://www.sec.gov" + path
                     break
             if not doc_url:
                 links = re.findall(r'href="(/Archives/edgar/data/[^"]+\.htm)"', r_idx.text, re.IGNORECASE)
@@ -260,10 +336,15 @@ def edgar_fetch_filing_text(cik, accession_no_dashes, max_chars=80000):
             rows       = re.findall(r'<tr[^>]*>.*?</tr>', r_idx.text, re.DOTALL | re.IGNORECASE)
             candidates = []
             for row in rows:
-                href_m = re.search(r'href="(/Archives[^"]+\.htm)"', row, re.IGNORECASE)
+                href_m = re.search(r'href="(/(?:ix\?doc=)?/Archives[^"]+\.htm)"', row, re.IGNORECASE)
+                if not href_m:
+                    href_m = re.search(r'href="(/Archives[^"]+\.htm)"', row, re.IGNORECASE)
                 type_m = re.search(r'<td[^>]*>\s*(10-K|20-F|FORM 10-K|FORM 20-F)\s*</td>', row, re.IGNORECASE)
                 if href_m and type_m:
-                    candidates.append("https://www.sec.gov" + href_m.group(1))
+                    path = href_m.group(1)
+                    # Strip iXBRL viewer wrapper: /ix?doc=/Archives/... → /Archives/...
+                    path = re.sub(r'^/ix\?doc=', '', path)
+                    candidates.append("https://www.sec.gov" + path)
             if not candidates:
                 all_links  = re.findall(r'href="(/Archives/edgar/data/[^"]+\.htm)"', r_idx.text, re.IGNORECASE)
                 candidates = ["https://www.sec.gov" + l for l in all_links
