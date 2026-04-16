@@ -133,20 +133,26 @@ def render_company(ticker, company):
             if v is None: return "—"
             return f"+{v:.1f}%" if v >= 0 else f"{v:.1f}%"
 
-        rev_3yr = _cagr(rev_s, 3)
-        rev_5yr = _cagr(rev_s, 5)
-        oi_3yr  = _cagr(oi_s,  3)
-        oi_5yr  = _cagr(oi_s,  5)
-        gp_l    = latest(gp_s)
-        gp_p    = prev(gp_s)
+        rev_5yr  = _cagr(rev_s, 5)
+        rev_10yr = _cagr(rev_s, 10)
+        rev_15yr = _cagr(rev_s, 15)
+        oi_5yr   = _cagr(oi_s,  5)
+        oi_10yr  = _cagr(oi_s,  10)
+        oi_15yr  = _cagr(oi_s,  15)
+        gp_l     = latest(gp_s)
+        gp_p     = prev(gp_s)
 
-        rk1, rk2, rk3, rk4, rk5, rk6 = st.columns(6)
-        kpi_block(rk1, "Revenue",       fmt_currency(rev_l, ccy),  yoy(rev_l, rev_p))
-        kpi_block(rk2, "3yr Rev CAGR",  _fmt_cagr_r(rev_3yr))
-        kpi_block(rk3, "5yr Rev CAGR",  _fmt_cagr_r(rev_5yr))
-        kpi_block(rk4, "Op. Income",    fmt_currency(latest(oi_s), ccy), yoy(latest(oi_s), prev(oi_s)))
-        kpi_block(rk5, "3yr OI CAGR",   _fmt_cagr_r(oi_3yr))
-        kpi_block(rk6, "5yr OI CAGR",   _fmt_cagr_r(oi_5yr))
+        rk1, rk2, rk3, rk4 = st.columns(4)
+        kpi_block(rk1, "Revenue",      fmt_currency(rev_l, ccy), yoy(rev_l, rev_p))
+        kpi_block(rk2, "5yr CAGR",     _fmt_cagr_r(rev_5yr))
+        kpi_block(rk3, "10yr CAGR",    _fmt_cagr_r(rev_10yr))
+        kpi_block(rk4, "15yr CAGR",    _fmt_cagr_r(rev_15yr))
+
+        ok1, ok2, ok3, ok4 = st.columns(4)
+        kpi_block(ok1, "Op. Income",   fmt_currency(latest(oi_s), ccy), yoy(latest(oi_s), prev(oi_s)))
+        kpi_block(ok2, "5yr CAGR",     _fmt_cagr_r(oi_5yr))
+        kpi_block(ok3, "10yr CAGR",    _fmt_cagr_r(oi_10yr))
+        kpi_block(ok4, "15yr CAGR",    _fmt_cagr_r(oi_15yr))
 
         st.markdown("<br>", unsafe_allow_html=True)
 
