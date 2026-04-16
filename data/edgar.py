@@ -179,29 +179,62 @@ def fetch_liquidity_xbrl(ticker):
         r.raise_for_status()
         us_gaap = r.json().get("facts", {}).get("us-gaap", {})
 
-        def get_annual(concepts, n=7):
+        def _entries(name):
+            """Return USD entries, falling back to the largest non-USD unit (for 20-F filers)."""
+            units = us_gaap.get(name, {}).get("units", {})
+            if units.get("USD"):
+                return units["USD"]
+            # Non-USD filers (e.g. GBP, EUR, CAD): pick the unit with the most entries
+            if units:
+                return max(units.values(), key=len)
+            return []
+
+        def get_annual(concepts, n=10):
+            """
+            Try every concept in the list; return the one whose most recent
+            annual data-point is newest.  This prevents truncation when companies
+            change concept names mid-history (e.g. LongTermDebt → LongTermDebtNoncurrent).
+
+            Per-entry filters applied:
+              • form must be 10-K / 20-F (or /A amendments)
+              • fp (fiscal period) must be 'FY' or absent – skips quarterly
+                sub-period entries (Q1/Q2/Q3/H1/H2) that occasionally appear
+                inside annual filings
+            """
+            best_result = {}
+            best_latest = "0"
             for name in concepts:
-                entries = us_gaap.get(name, {}).get("units", {}).get("USD", [])
+                entries = _entries(name)
                 if not entries:
                     continue
                 by_year, filed_at = {}, {}
                 for e in entries:
                     if e.get("form") not in ("10-K", "20-F", "10-K/A", "20-F/A"):
                         continue
+                    # Skip non-full-year sub-periods (quarterly, half-year, etc.)
+                    fp = e.get("fp")
+                    if fp and fp != "FY":
+                        continue
                     yr = (e.get("end") or "")[:4]
                     fd = e.get("filed", "")
                     if yr and (yr not in filed_at or fd > filed_at[yr]):
                         by_year[yr] = e.get("val")
                         filed_at[yr] = fd
-                if by_year:
-                    yrs = sorted(by_year)[-n:]
-                    return {y: by_year[y] for y in yrs}
+                if not by_year:
+                    continue
+                latest_yr = max(by_year.keys())
+                if latest_yr > best_latest:
+                    best_latest = latest_yr
+                    best_result = by_year
+            if best_result:
+                yrs = sorted(best_result)[-n:]
+                return {y: best_result[y] for y in yrs}
             return {}
 
         def get_maturity(concepts):
             """Most-recent annual filing value for a debt-maturity schedule concept."""
             for name in concepts:
-                entries = us_gaap.get(name, {}).get("units", {}).get("USD", [])
+                entries = _entries(name)
                 annual  = [e for e in entries
                            if e.get("form") in ("10-K", "20-F", "10-K/A", "20-F/A")]
                 if not annual:
@@ -215,30 +248,45 @@ def fetch_liquidity_xbrl(ticker):
         return {
             "cash":           get_annual(["CashAndCashEquivalentsAtCarryingValue",
                                           "CashCashEquivalentsAndShortTermInvestments",
+                                          "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents",
                                           "CashAndCashEquivalents"]),
-            "st_debt":        get_annual(["ShortTermBorrowings", "ShortTermDebt",
-                                          "CommercialPaper", "NotesPayableCurrent"]),
+            "st_debt":        get_annual(["ShortTermBorrowings",
+                                          "CommercialPaper",
+                                          "ShortTermBorrowingsAndCurrentPortionOfLongTermDebt",
+                                          "NotesPayableCurrent",
+                                          "LineOfCredit"]),
             "ltd_current":    get_annual(["LongTermDebtCurrent",
                                           "LongTermDebtAndCapitalLeaseObligationsCurrent",
-                                          "DebtCurrent"]),
-            "ltd_noncurrent": get_annual(["LongTermDebtNoncurrent", "LongTermDebt",
-                                          "LongTermDebtAndCapitalLeaseObligations"]),
+                                          "DebtCurrent",
+                                          "CurrentPortionOfLongTermDebt"]),
+            "ltd_noncurrent": get_annual(["LongTermDebtNoncurrent",
+                                          "LongTermDebtAndCapitalLeaseObligations",
+                                          "LongTermDebt",
+                                          "LongTermNotesPayable",
+                                          "SeniorLongTermNotes"]),
             "total_assets":   get_annual(["Assets"]),
             "total_liab":     get_annual(["Liabilities"]),
             "equity":         get_annual(["StockholdersEquity",
                                           "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"]),
-            "interest_exp":   get_annual(["InterestExpense", "InterestAndDebtExpense",
-                                          "InterestExpenseDebt", "InterestCostsIncurred"]),
+            "interest_exp":   get_annual(["InterestExpense",
+                                          "InterestAndDebtExpense",
+                                          "InterestExpenseDebt",
+                                          "InterestCostsIncurred",
+                                          "InterestPaidNet"]),
             "da":             get_annual(["DepreciationDepletionAndAmortization",
-                                          "DepreciationAndAmortization", "Depreciation"]),
+                                          "DepreciationAndAmortization",
+                                          "Depreciation",
+                                          "DepreciationAmortizationAndAccretionNet"]),
             "retained_earnings": get_annual(["RetainedEarningsAccumulatedDeficit"]),
-            # ── Debt maturity schedule (point-in-time from most recent filing) ──
-            "mat_y1":     get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths"]),
-            "mat_y2":     get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearTwo"]),
-            "mat_y3":     get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearThree"]),
-            "mat_y4":     get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearFour"]),
-            "mat_y5":     get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearFive"]),
-            "mat_after":  get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalAfterYearFive"]),
+            # ── Debt maturity schedule (point-in-time, most recent filing) ──────
+            "mat_y1":    get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths",
+                                       "LongTermDebtMaturitiesRepaymentsOfPrincipalRemainderOfFiscalYear"]),
+            "mat_y2":    get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearTwo"]),
+            "mat_y3":    get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearThree"]),
+            "mat_y4":    get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearFour"]),
+            "mat_y5":    get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearFive"]),
+            "mat_after": get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalAfterYearFive",
+                                       "LongTermDebtMaturitiesRepaymentsOfPrincipalAfterYearSix"]),
         }
     except Exception:
         return {}
