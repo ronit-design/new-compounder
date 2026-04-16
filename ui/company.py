@@ -135,16 +135,18 @@ def render_company(ticker, company):
 
         rev_3yr = _cagr(rev_s, 3)
         rev_5yr = _cagr(rev_s, 5)
+        oi_3yr  = _cagr(oi_s,  3)
+        oi_5yr  = _cagr(oi_s,  5)
         gp_l    = latest(gp_s)
         gp_p    = prev(gp_s)
 
         rk1, rk2, rk3, rk4, rk5, rk6 = st.columns(6)
-        kpi_block(rk1, "Revenue",      fmt_currency(rev_l, ccy),        yoy(rev_l, rev_p))
-        kpi_block(rk2, "3yr Rev CAGR", _fmt_cagr_r(rev_3yr))
-        kpi_block(rk3, "5yr Rev CAGR", _fmt_cagr_r(rev_5yr))
-        kpi_block(rk4, "Gross Profit", fmt_currency(gp_l, ccy),         yoy(gp_l, gp_p))
-        kpi_block(rk5, "Gross Margin", fmt_pct(latest(gm_s)))
-        kpi_block(rk6, "Net Income",   fmt_currency(latest(ni_s), ccy), yoy(latest(ni_s), prev(ni_s)))
+        kpi_block(rk1, "Revenue",       fmt_currency(rev_l, ccy),  yoy(rev_l, rev_p))
+        kpi_block(rk2, "3yr Rev CAGR",  _fmt_cagr_r(rev_3yr))
+        kpi_block(rk3, "5yr Rev CAGR",  _fmt_cagr_r(rev_5yr))
+        kpi_block(rk4, "Op. Income",    fmt_currency(latest(oi_s), ccy), yoy(latest(oi_s), prev(oi_s)))
+        kpi_block(rk5, "3yr OI CAGR",   _fmt_cagr_r(oi_3yr))
+        kpi_block(rk6, "5yr OI CAGR",   _fmt_cagr_r(oi_5yr))
 
         st.markdown("<br>", unsafe_allow_html=True)
 
