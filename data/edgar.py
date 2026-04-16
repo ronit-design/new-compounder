@@ -168,6 +168,83 @@ def fetch_rsu_tax_xbrl(ticker):
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+def fetch_liquidity_xbrl(ticker):
+    """Fetch XBRL concepts needed for the Liquidity page."""
+    cik = edgar_get_cik(ticker)
+    if not cik:
+        return {}
+    try:
+        r = requests.get(f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json",
+                         headers=_HDRS, timeout=30)
+        r.raise_for_status()
+        us_gaap = r.json().get("facts", {}).get("us-gaap", {})
+
+        def get_annual(concepts, n=7):
+            for name in concepts:
+                entries = us_gaap.get(name, {}).get("units", {}).get("USD", [])
+                if not entries:
+                    continue
+                by_year, filed_at = {}, {}
+                for e in entries:
+                    if e.get("form") not in ("10-K", "20-F", "10-K/A", "20-F/A"):
+                        continue
+                    yr = (e.get("end") or "")[:4]
+                    fd = e.get("filed", "")
+                    if yr and (yr not in filed_at or fd > filed_at[yr]):
+                        by_year[yr] = e.get("val")
+                        filed_at[yr] = fd
+                if by_year:
+                    yrs = sorted(by_year)[-n:]
+                    return {y: by_year[y] for y in yrs}
+            return {}
+
+        def get_maturity(concepts):
+            """Most-recent annual filing value for a debt-maturity schedule concept."""
+            for name in concepts:
+                entries = us_gaap.get(name, {}).get("units", {}).get("USD", [])
+                annual  = [e for e in entries
+                           if e.get("form") in ("10-K", "20-F", "10-K/A", "20-F/A")]
+                if not annual:
+                    continue
+                annual.sort(key=lambda e: e.get("filed", ""), reverse=True)
+                val = annual[0].get("val")
+                if val is not None:
+                    return abs(float(val))
+            return None
+
+        return {
+            "cash":           get_annual(["CashAndCashEquivalentsAtCarryingValue",
+                                          "CashCashEquivalentsAndShortTermInvestments",
+                                          "CashAndCashEquivalents"]),
+            "st_debt":        get_annual(["ShortTermBorrowings", "ShortTermDebt",
+                                          "CommercialPaper", "NotesPayableCurrent"]),
+            "ltd_current":    get_annual(["LongTermDebtCurrent",
+                                          "LongTermDebtAndCapitalLeaseObligationsCurrent",
+                                          "DebtCurrent"]),
+            "ltd_noncurrent": get_annual(["LongTermDebtNoncurrent", "LongTermDebt",
+                                          "LongTermDebtAndCapitalLeaseObligations"]),
+            "total_assets":   get_annual(["Assets"]),
+            "total_liab":     get_annual(["Liabilities"]),
+            "equity":         get_annual(["StockholdersEquity",
+                                          "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest"]),
+            "interest_exp":   get_annual(["InterestExpense", "InterestAndDebtExpense",
+                                          "InterestExpenseDebt", "InterestCostsIncurred"]),
+            "da":             get_annual(["DepreciationDepletionAndAmortization",
+                                          "DepreciationAndAmortization", "Depreciation"]),
+            "retained_earnings": get_annual(["RetainedEarningsAccumulatedDeficit"]),
+            # ── Debt maturity schedule (point-in-time from most recent filing) ──
+            "mat_y1":     get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInNextTwelveMonths"]),
+            "mat_y2":     get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearTwo"]),
+            "mat_y3":     get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearThree"]),
+            "mat_y4":     get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearFour"]),
+            "mat_y5":     get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalInYearFive"]),
+            "mat_after":  get_maturity(["LongTermDebtMaturitiesRepaymentsOfPrincipalAfterYearFive"]),
+        }
+    except Exception:
+        return {}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_forensic_xbrl(ticker):
     cik = edgar_get_cik(ticker)
     if not cik:

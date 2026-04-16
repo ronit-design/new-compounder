@@ -16,6 +16,7 @@ from analysis.forensic import (build_forensic_dataset, _fmt_xbrl_table,
 from analysis.research import generate_report_nvidia, generate_report_haiku
 from reports.pdf import build_report_pdf
 from ui.components import kpi_block, make_bar, make_line
+from ui.liquidity import render_liquidity
 from utils import (safe, align, latest, prev, yoy, ccy_symbol,
                    fmt_currency, fmt_pct, fmt_multiple, fmt_eps, to_pct_list)
 
@@ -112,9 +113,9 @@ def render_company(ticker, company):
     kpi_block(k6, "EPS",              fmt_eps(eps_l, ccy), yoy(eps_l, eps_p))
 
     st.markdown("<br>", unsafe_allow_html=True)
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "Revenue", "Margins", "Cash Flow", "Valuation",
-        "Working Capital", "Owners' Earnings", "Forensic Accounting", "Research Report",
+        "Working Capital", "Liquidity", "Owners' Earnings", "Forensic Accounting", "Research Report",
     ])
 
     # ── Tab 1: Revenue ─────────────────────────────────────────────────────────
@@ -382,8 +383,17 @@ def render_company(ticker, company):
         }).set_index("Metric")
         st.dataframe(wc_display, use_container_width=True)
 
-    # ── Tab 6: Owners' Earnings ────────────────────────────────────────────────
+    # ── Tab 6: Liquidity ──────────────────────────────────────────────────────
     with tab6:
+        render_liquidity(
+            ticker, company, inc, bs, cf,
+            years, ccy, ccy_code,
+            oi_s, rev_s, ca_s, cl_s, inv_s,
+            price_s, shares_s,
+        )
+
+    # ── Tab 7: Owners' Earnings ────────────────────────────────────────────────
+    with tab7:
         def _v(s, i):
             try:
                 v = s.iloc[i]
@@ -669,8 +679,8 @@ def render_company(ticker, company):
         }).set_index("Metric")
         st.dataframe(oe_display, use_container_width=True)
 
-    # ── Tab 7: Forensic Accounting ────────────────────────────────────────────
-    with tab7:
+    # ── Tab 8: Forensic Accounting ────────────────────────────────────────────
+    with tab8:
         _is_non_us = bool(re.search(r"[.][A-Z]{1,4}$", ticker.upper()))
 
         st.markdown(
@@ -754,8 +764,8 @@ def render_company(ticker, company):
                     st.markdown(f'<pre style="font-size:0.72rem;line-height:1.5">{_fa_result["notes_summary"]}</pre>',
                                 unsafe_allow_html=True)
 
-    # ── Tab 8: Research Report ─────────────────────────────────────────────────
-    with tab8:
+    # ── Tab 9: Research Report ─────────────────────────────────────────────────
+    with tab9:
         st.markdown(
             '<div style="font-size:0.82rem;color:#555;margin-bottom:1.5rem;line-height:1.6">'
             'Generates a comprehensive equity research report in the style of a Berkshire Hathaway analyst. '
