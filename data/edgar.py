@@ -376,13 +376,20 @@ def edgar_fetch_filing_text(cik, accession_no_dashes, max_chars=80000):
             ("MD&A",     r"(?i)item\s*7[\s.]+management.{0,60}?discussion", r"(?i)item\s*7a[\s.]+"),
         ]
         for name, start_pat, end_pat in patterns:
-            m_s = re.search(start_pat, text)
-            if not m_s:
-                continue
-            tail  = text[m_s.end():]
-            m_e   = re.search(end_pat, tail)
-            chunk = tail[:m_e.start()] if m_e else tail[:30000]
-            sections[name] = chunk[:25000].strip()
+            # Iterate all start matches and take the first one with substantial content
+            # (skips table-of-contents entries which are immediately followed by the
+            # next section heading a few characters later)
+            best_chunk = None
+            for m_s in re.finditer(start_pat, text):
+                tail  = text[m_s.end():]
+                m_e   = re.search(end_pat, tail)
+                chunk = tail[:m_e.start()] if m_e else tail[:30000]
+                chunk = chunk[:25000].strip()
+                if len(chunk) > 500:
+                    best_chunk = chunk
+                    break
+            if best_chunk:
+                sections[name] = best_chunk
 
         if sections:
             out = ""
