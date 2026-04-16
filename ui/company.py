@@ -563,58 +563,54 @@ def render_company(ticker, company):
                     peg = pe_cur / g if g > 0 else None
             peg_list.append(peg)
 
-        # Multiples line chart with ±1σ historical bands
-        val_ys, val_names = [], []
-        for lst, nm in [(pe_list, "P/E"), (pfcf_list, "P/FCF"), (evebit_list, "EV/EBIT"),
-                        (evrev_list, "EV/Revenue"), (ps_list, "P/Sales")]:
-            if any(v for v in lst if v):
-                val_ys.append(lst); val_names.append(nm)
+        # One chart per multiple, 2-column grid, each with ±1σ band
+        def _mean_std(vals):
+            clean = [v for v in vals if v is not None]
+            if len(clean) < 3: return None, None
+            m = sum(clean) / len(clean)
+            s = (sum((v - m) ** 2 for v in clean) / len(clean)) ** 0.5
+            return m, s
 
-        if val_ys:
-            def _mean_std(vals):
-                clean = [v for v in vals if v is not None]
-                if len(clean) < 3: return None, None
-                m = sum(clean) / len(clean)
-                s = (sum((v - m) ** 2 for v in clean) / len(clean)) ** 0.5
-                return m, s
-
-            band_alphas = ["0.07", "0.08", "0.07", "0.07", "0.07"]
-            band_rgb    = ["17,17,17", "170,170,170", "85,85,85", "17,17,17", "85,85,85"]
-
-            fig_v = go.Figure()
-
-            # ±1σ bands (drawn first so lines sit on top)
-            for j, (lst, nm) in enumerate(zip(val_ys, val_names)):
-                m, s = _mean_std(lst)
-                if m is None: continue
+        def _multiple_chart(lst, title, suffix="x"):
+            fig = go.Figure()
+            m, s = _mean_std(lst)
+            if m is not None:
                 upper = [m + s if v is not None else None for v in lst]
                 lower = [m - s if v is not None else None for v in lst]
-                fc    = f"rgba({band_rgb[j % len(band_rgb)]},{band_alphas[j % len(band_alphas)]})"
-                fig_v.add_trace(go.Scatter(x=years, y=upper, mode="lines",
-                                           line=dict(width=0), showlegend=False,
-                                           hoverinfo="skip", legendgroup=nm))
-                fig_v.add_trace(go.Scatter(x=years, y=lower, mode="lines", fill="tonexty",
-                                           fillcolor=fc, line=dict(width=0),
-                                           showlegend=False, hoverinfo="skip", legendgroup=nm))
-
-            # Metric lines
-            for j, (lst, nm) in enumerate(zip(val_ys, val_names)):
-                fig_v.add_trace(go.Scatter(
-                    x=years, y=lst, name=nm, mode="lines",
-                    line=dict(color=LINE_COLORS[j % len(LINE_COLORS)], width=1.5),
-                    hovertemplate=f"%{{x}}<br>{nm}: %{{y:,.1f}}x<extra></extra>",
-                    connectgaps=False, legendgroup=nm,
-                ))
-
-            fig_v.update_layout(**CHART_BASE)
-            fig_v.update_layout(
-                height=320,
-                title=dict(text="Valuation Multiples  (shaded band = ±1σ historical range)",
-                           font=dict(size=11, color=C_TEXT3, weight=500), x=0),
-                yaxis=dict(ticksuffix="x", showgrid=True, gridcolor=C_BORDER2,
+                fig.add_trace(go.Scatter(x=years, y=upper, mode="lines",
+                                         line=dict(width=0), showlegend=False, hoverinfo="skip"))
+                fig.add_trace(go.Scatter(x=years, y=lower, mode="lines", fill="tonexty",
+                                         fillcolor="rgba(17,17,17,0.07)", line=dict(width=0),
+                                         showlegend=False, hoverinfo="skip"))
+            fig.add_trace(go.Scatter(
+                x=years, y=lst, mode="lines+markers",
+                line=dict(color=C_ACCENT, width=1.8),
+                marker=dict(size=4, color=C_ACCENT),
+                showlegend=False, connectgaps=False,
+                hovertemplate=f"%{{x}}: %{{y:,.1f}}{suffix}<extra></extra>",
+            ))
+            fig.update_layout(**CHART_BASE)
+            fig.update_layout(
+                height=220,
+                title=dict(text=title, font=dict(size=11, color=C_TEXT3, weight=500), x=0),
+                yaxis=dict(ticksuffix=suffix, showgrid=True, gridcolor=C_BORDER2,
                            tickfont=dict(size=10, color=C_TEXT3), zeroline=False),
             )
-            st.plotly_chart(fig_v, use_container_width=True, config={"displayModeBar": False})
+            return fig
+
+        active = [(lst, nm, "x") for lst, nm in [
+            (pe_list, "P/E"), (pfcf_list, "P/FCF"), (evebit_list, "EV/EBIT"),
+            (evrev_list, "EV/Revenue"), (ps_list, "P/Sales"),
+        ] if any(v for v in lst if v)]
+
+        if active:
+            for i in range(0, len(active), 2):
+                pair = active[i:i+2]
+                cols = st.columns(2, gap="large")
+                for col, (lst, nm, sfx) in zip(cols, pair):
+                    with col:
+                        st.plotly_chart(_multiple_chart(lst, nm, sfx),
+                                        use_container_width=True, config={"displayModeBar": False})
         else:
             st.markdown('<span style="color:#999;font-size:0.82rem">Stock price required to calculate multiples.</span>',
                         unsafe_allow_html=True)
