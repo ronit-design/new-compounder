@@ -574,26 +574,42 @@ def render_company(ticker, company):
         def _multiple_chart(lst, title, suffix="x"):
             fig = go.Figure()
             m, s = _mean_std(lst)
+
             if m is not None:
-                upper = [m + s if v is not None else None for v in lst]
-                lower = [m - s if v is not None else None for v in lst]
-                fig.add_trace(go.Scatter(x=years, y=upper, mode="lines",
-                                         line=dict(width=0), showlegend=False, hoverinfo="skip"))
-                fig.add_trace(go.Scatter(x=years, y=lower, mode="lines", fill="tonexty",
-                                         fillcolor="rgba(17,17,17,0.07)", line=dict(width=0),
-                                         showlegend=False, hoverinfo="skip"))
+                # Reference lines: -2σ … +2σ
+                ref_levels = [
+                    (m + 2*s, "+2σ", "#BBBBBB", "dot"),
+                    (m +   s, "+1σ", "#888888", "dash"),
+                    (m,       "Med", "#333333", "solid"),
+                    (m -   s, "-1σ", "#888888", "dash"),
+                    (m - 2*s, "-2σ", "#BBBBBB", "dot"),
+                ]
+                for val, label, color, dash in ref_levels:
+                    if val <= 0:
+                        continue
+                    fig.add_hline(
+                        y=val,
+                        line=dict(color=color, width=1, dash=dash),
+                        annotation_text=f"<b>{label}</b> {val:.1f}{suffix}",
+                        annotation_position="right",
+                        annotation_font=dict(size=8, color=color),
+                        annotation_bgcolor="rgba(255,255,255,0.7)",
+                    )
+
+            # Actual value line — bold so it reads above the reference lines
             fig.add_trace(go.Scatter(
                 x=years, y=lst, mode="lines+markers",
-                line=dict(color=C_ACCENT, width=1.8),
-                marker=dict(size=4, color=C_ACCENT),
+                line=dict(color=C_ACCENT, width=2.2),
+                marker=dict(size=5, color=C_ACCENT),
                 showlegend=False, connectgaps=False,
                 hovertemplate=f"%{{x}}: %{{y:,.1f}}{suffix}<extra></extra>",
             ))
             fig.update_layout(**CHART_BASE)
             fig.update_layout(
-                height=220,
+                height=250,
                 title=dict(text=title, font=dict(size=11, color=C_TEXT3, weight=500), x=0),
-                yaxis=dict(ticksuffix=suffix, showgrid=True, gridcolor=C_BORDER2,
+                margin=dict(l=0, r=90, t=48, b=0),
+                yaxis=dict(ticksuffix=suffix, showgrid=False,
                            tickfont=dict(size=10, color=C_TEXT3), zeroline=False),
             )
             return fig
