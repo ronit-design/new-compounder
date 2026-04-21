@@ -23,6 +23,7 @@ def _clean_report(text):
     text = re.sub(r"(?m)^#{1,6}\s*", "", text)
     text = re.sub(r"\*{2}(.+?)\*{2}", r"\1", text, flags=re.DOTALL)
     text = re.sub(r"\*(.+?)\*",       r"\1", text)
+    text = re.sub(r"`+([^`]*)`+",     r"\1", text)   # strip inline code / backticks
 
     def _debullet(m):
         line = m.group(1).strip()
@@ -64,26 +65,26 @@ def _clean_report(text):
 # ── Polish pass (runs after initial generation for both NVIDIA and Haiku) ─────
 
 def _polish_section(heading, body, api_key):
-    """Send one report section to NVIDIA for prose consistency editing."""
+    """Send one report section body to NVIDIA for prose consistency editing.
+    Returns only the polished body — the heading is prepended by _polish_report."""
     prompt = f"""You are a professional investment research editor preparing a final deliverable for an investment committee.
 
-Below is a draft section of an equity research report. Rewrite it as clean, publication-ready prose. Apply every rule below without exception.
+Below is a draft body of one section of an equity research report. Rewrite it as clean, publication-ready prose. Apply every rule below without exception.
 
 EDITING RULES:
 1. Convert every bullet point, dash list, or numbered sub-list into complete flowing sentences embedded in paragraphs. No item should remain as a standalone line starting with a dash, bullet, or number.
 2. Fix every broken or fragmented line — merge orphaned lines into their surrounding paragraph.
-3. Rewrite any mathematical formula or notation in plain English. For example, "ROIC = NOPAT / Invested Capital" becomes "return on invested capital is calculated by dividing net operating profit after tax by total invested capital."
-4. Every paragraph must contain a minimum of five sentences: a point, evidence from the data, analysis of what the evidence means, a second-order implication, and a conclusion.
-5. No markdown characters anywhere — no **, no ##, no -, no >.
-6. Preserve every factual claim, financial figure, citation (e.g. FY2024 Income Statement), and verbatim management quote exactly as written. Do not add any information not present in the draft. Do not remove any information from the draft.
-7. Write the section heading exactly as given on its own line with no markdown, then begin the prose on the next line immediately.
+3. Never write out arithmetic operations. If a formula or calculation appears (e.g. "ROIC = NOPAT / Invested Capital" or "calculated as 394.85 million divided by 2.35 billion"), state only the final result as a clean figure or percentage and explain what it represents in plain English. The reader must never see raw division, multiplication, or equation syntax.
+4. Never use backticks or inline code formatting. Remove any text wrapped in backticks and write it as plain prose instead.
+5. Every paragraph must contain a minimum of five sentences: a point, evidence from the data, analysis of what the evidence means, a second-order implication, and a conclusion.
+6. No markdown characters anywhere — no **, no ##, no -, no >, no backticks.
+7. Preserve every factual claim, financial figure, citation (e.g. FY2024 Income Statement), and verbatim management quote exactly as written. Do not add any information not present in the draft. Do not remove any information from the draft.
+8. Begin your response directly with the first paragraph of body prose. Do not write the section heading.
 
-DRAFT SECTION:
-{heading}
-
+DRAFT SECTION BODY (section heading is "{heading}"):
 {body}
 
-Rewrite this section now as polished, publication-ready prose:"""
+Rewrite the body now as polished, publication-ready prose — starting directly with the first paragraph:"""
 
     return _call_nvidia(
         [{"role": "user", "content": prompt}],
@@ -121,9 +122,11 @@ def _polish_report(report_text, api_key, on_progress=None):
         if on_progress:
             on_progress(idx, heading, total)
 
-        polished = _polish_section(heading, body, api_key)
-        if polished and polished.strip():
-            polished_parts.append(polished.strip())
+        polished_body = _polish_section(heading, body, api_key)
+        if polished_body and polished_body.strip():
+            # Always prepend the heading ourselves so it is guaranteed to be
+            # on its own line in the exact format the PDF splitter expects.
+            polished_parts.append(f"{heading}\n\n{polished_body.strip()}")
         else:
             # Fall back to original if NVIDIA returns nothing
             polished_parts.append(f"{heading}\n\n{body}")

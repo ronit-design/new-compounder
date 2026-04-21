@@ -35,7 +35,6 @@ def build_report_pdf(company, ticker, report_text, transcripts, chart_figs=None)
     s_cover_name = S("cnm",  fontName="Helvetica-Bold",       fontSize=26,   textColor=INK,      leading=30, spaceAfter=6)
     s_cover_sub  = S("csb",  fontName="Helvetica",            fontSize=12,   textColor=MID,      spaceAfter=4)
     s_cover_meta = S("cmt",  fontName="Helvetica",            fontSize=8.5,  textColor=MUTED)
-    s_disc       = S("dsc",  fontName="Helvetica-Oblique",    fontSize=7.5,  textColor=MUTED,    spaceAfter=12, leading=11)
     s_sec        = S("sec",  fontName="Helvetica-Bold",       fontSize=11,   textColor=INK,      spaceBefore=20, spaceAfter=6, leading=14)
     s_body       = S("bdy",  fontName="Helvetica",            fontSize=9.5,  textColor=BODY_CLR, leading=15, spaceAfter=8, alignment=TA_JUSTIFY)
     s_caption    = S("cap",  fontName="Helvetica-Oblique",    fontSize=8,    textColor=MUTED,    spaceBefore=3, spaceAfter=10, alignment=TA_CENTER)
@@ -60,11 +59,6 @@ def build_report_pdf(company, ticker, report_text, transcripts, chart_figs=None)
     tc = f"{len(transcripts)} earnings transcript(s)" if transcripts else "No transcripts available"
     story.append(Paragraph(f"Generated {now}  ·  {tc}  ·  Fundamental analysis", s_cover_meta))
     story.append(Spacer(1, 0.5 * cm))
-    story.append(Paragraph(
-        "This report is AI-generated for informational purposes only and does not constitute "
-        "investment advice. All financial figures are sourced from roic.ai. "
-        "Verify all data independently before making investment decisions.",
-        s_disc))
     story.append(hr())
 
     # Pre-render charts in parallel
