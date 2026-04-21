@@ -13,7 +13,7 @@ from data.edgar import (edgar_get_cik, edgar_list_annual_filings,
 from analysis.forensic import (build_forensic_dataset, _fmt_xbrl_table,
                                 _fetch_notes_concurrent, _extract_signals_concurrent,
                                 _fmt_notes_signals, generate_forensic_report)
-from analysis.research import generate_report_nvidia, generate_report_haiku
+from analysis.research import generate_research_report
 from reports.pdf import build_report_pdf
 from ui.components import kpi_block, make_bar, make_line
 from ui.liquidity import render_liquidity
