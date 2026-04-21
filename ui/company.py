@@ -1296,7 +1296,7 @@ def render_company(ticker, company):
 
             meta_parts = []
             if model_used == "nvidia" and form_used:
-                meta_parts.append(f"Model: DeepSeek R1  ·  Filing: {form_used} ({_date_preview})")
+                meta_parts.append(f"Model: NVIDIA Nemotron  ·  Filing: {form_used} ({_date_preview})")
             else:
                 meta_parts.append("Model: Claude Haiku  ·  Source: web search + financial data")
             if transcripts:
