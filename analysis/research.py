@@ -61,10 +61,81 @@ def _clean_report(text):
     return "\n\n".join(merged).strip()
 
 
+# ── Polish pass (runs after initial generation for both NVIDIA and Haiku) ─────
+
+def _polish_section(heading, body, api_key):
+    """Send one report section to NVIDIA for prose consistency editing."""
+    prompt = f"""You are a professional investment research editor preparing a final deliverable for an investment committee.
+
+Below is a draft section of an equity research report. Rewrite it as clean, publication-ready prose. Apply every rule below without exception.
+
+EDITING RULES:
+1. Convert every bullet point, dash list, or numbered sub-list into complete flowing sentences embedded in paragraphs. No item should remain as a standalone line starting with a dash, bullet, or number.
+2. Fix every broken or fragmented line — merge orphaned lines into their surrounding paragraph.
+3. Rewrite any mathematical formula or notation in plain English. For example, "ROIC = NOPAT / Invested Capital" becomes "return on invested capital is calculated by dividing net operating profit after tax by total invested capital."
+4. Every paragraph must contain a minimum of five sentences: a point, evidence from the data, analysis of what the evidence means, a second-order implication, and a conclusion.
+5. No markdown characters anywhere — no **, no ##, no -, no >.
+6. Preserve every factual claim, financial figure, citation (e.g. FY2024 Income Statement), and verbatim management quote exactly as written. Do not add any information not present in the draft. Do not remove any information from the draft.
+7. Write the section heading exactly as given on its own line with no markdown, then begin the prose on the next line immediately.
+
+DRAFT SECTION:
+{heading}
+
+{body}
+
+Rewrite this section now as polished, publication-ready prose:"""
+
+    return _call_nvidia(
+        [{"role": "user", "content": prompt}],
+        api_key,
+        max_tokens=8000,
+    )
+
+
+def _polish_report(report_text, api_key, on_progress=None):
+    """Split the assembled report into sections and polish each through NVIDIA."""
+    # Match numbered section headings like "1. THE FOUNDATION: ..."
+    section_re = re.compile(
+        r'(?m)^(\d+\.\s+[A-Z][A-Z\s&:,\-]+)$'
+    )
+
+    parts = section_re.split(report_text)
+    # parts layout: [preamble, heading1, body1, heading2, body2, ...]
+
+    sections = []
+    i = 1
+    while i < len(parts) - 1:
+        heading = parts[i].strip()
+        body    = parts[i + 1].strip()
+        sections.append((heading, body))
+        i += 2
+
+    if not sections:
+        # Couldn't split — return original untouched
+        return report_text
+
+    total          = len(sections)
+    polished_parts = []
+
+    for idx, (heading, body) in enumerate(sections, 1):
+        if on_progress:
+            on_progress(idx, heading, total)
+
+        polished = _polish_section(heading, body, api_key)
+        if polished and polished.strip():
+            polished_parts.append(polished.strip())
+        else:
+            # Fall back to original if NVIDIA returns nothing
+            polished_parts.append(f"{heading}\n\n{body}")
+
+    return "\n\n".join(polished_parts)
+
+
 # ── NVIDIA multi-section report ───────────────────────────────────────────────
 
 def generate_report_nvidia(company_name, ticker, financials_text, transcripts,
-                            filing_text, form_type, filing_date):
+                            filing_text, form_type, filing_date,
+                            on_section=None, on_polish=None):
     transcript_text = _format_transcripts(transcripts)
     filing_section  = (f"\n\n=== {form_type} FILING ({filing_date}) ===\n{filing_text[:60000]}"
                        if filing_text else "")
@@ -111,9 +182,13 @@ NOW WRITE ONLY THE FOLLOWING SECTION:
          "Identify specific trackable events over the next 6 to 18 months that will force a market repricing and explain the directional impact of each with evidence. Describe the undeniable multi-year secular tailwinds and headwinds driving revenue or compressing margins, distinguishing macro forces from competitive dynamics. If the business is undergoing a fundamental transition, quantify the inflection precisely and assess whether current market pricing reflects it."),
     ]
 
+    total_sections = len(sections)
     try:
         report_parts = []
-        for heading, instructions in sections:
+        for sec_idx, (heading, instructions) in enumerate(sections, 1):
+            if on_section:
+                on_section(sec_idx, heading, total_sections)
+
             section_prompt = data_block + f"{heading}\n\n{instructions}"
             text = _call_nvidia([{"role": "user", "content": section_prompt}], api_key)
             if not text:
@@ -137,14 +212,16 @@ NOW WRITE ONLY THE FOLLOWING SECTION:
         if not report_parts:
             return "NVIDIA returned empty responses for all sections."
 
-        return _clean_report("\n\n".join(report_parts))
+        assembled = _clean_report("\n\n".join(report_parts))
+        return _polish_report(assembled, api_key, on_progress=on_polish)
     except Exception as e:
         return f"Error generating report via NVIDIA: {e}"
 
 
 # ── Haiku report (non-US tickers) ─────────────────────────────────────────────
 
-def generate_report_haiku(company_name, ticker, financials_text, transcripts):
+def generate_report_haiku(company_name, ticker, financials_text, transcripts,
+                          on_polish=None):
     transcript_text = _format_transcripts(transcripts)
     source_note = ("No SEC filing is available for this company. "
                    "Use the web_search tool extensively to research the business model, "
@@ -190,7 +267,9 @@ def generate_report_haiku(company_name, ticker, financials_text, transcripts):
             data = r2.json()
 
         text_parts = [b["text"] for b in data["content"] if b.get("type") == "text"]
-        return _clean_report("\n\n".join(text_parts))
+        assembled  = _clean_report("\n\n".join(text_parts))
+        nvidia_key = st.secrets.get("NVIDIA_API_KEY", "")
+        return _polish_report(assembled, nvidia_key, on_progress=on_polish)
     except Exception as e:
         return f"Error generating report via Haiku: {e}"
 
@@ -198,15 +277,21 @@ def generate_report_haiku(company_name, ticker, financials_text, transcripts):
 # ── Router ─────────────────────────────────────────────────────────────────────
 
 def generate_research_report(company_name, ticker, financials_text, transcripts,
-                              web_context=""):
+                              web_context="", on_section=None, on_polish=None):
     has_suffix = bool(re.search(r"[.][A-Z]{1,4}$", ticker.upper()))
 
     if has_suffix:
-        return generate_report_haiku(company_name, ticker, financials_text, transcripts), "haiku", None
+        return (generate_report_haiku(company_name, ticker, financials_text, transcripts,
+                                      on_polish=on_polish),
+                "haiku", None)
 
     filing_text, form_type, filing_date = fetch_10k_text(ticker)
     if filing_text:
-        return generate_report_nvidia(company_name, ticker, financials_text, transcripts,
-                                      filing_text, form_type, filing_date), "nvidia", form_type
+        return (generate_report_nvidia(company_name, ticker, financials_text, transcripts,
+                                       filing_text, form_type, filing_date,
+                                       on_section=on_section, on_polish=on_polish),
+                "nvidia", form_type)
 
-    return generate_report_haiku(company_name, ticker, financials_text, transcripts), "haiku", None
+    return (generate_report_haiku(company_name, ticker, financials_text, transcripts,
+                                  on_polish=on_polish),
+            "haiku", None)

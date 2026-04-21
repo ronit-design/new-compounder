@@ -1192,7 +1192,8 @@ def render_company(ticker, company):
             '<div style="font-size:0.82rem;color:#555;margin-bottom:1.5rem;line-height:1.6">'
             'Generates a comprehensive equity research report in the style of a Berkshire Hathaway analyst. '
             'Uses the last 20 years of financial statements, last 4 earnings call transcripts, and web research. '
-            'Takes approximately 30–60 seconds.</div>',
+            'Each section is individually polished by AI to ensure publication-ready prose. '
+            'Takes approximately 5–10 minutes.</div>',
             unsafe_allow_html=True,
         )
 
@@ -1206,26 +1207,65 @@ def render_company(ticker, company):
 
             if _has_suffix:
                 _filing_text, _form_preview, _date_preview = None, None, None
-                spin_msg = f"{ticker} is non-US listed — generating report with Haiku + web search..."
             else:
                 with st.spinner("Searching EDGAR for 10-K / 20-F..."):
                     _filing_text, _form_preview, _date_preview = fetch_10k_text(ticker)
-                if _filing_text:
-                    spin_msg = f"Found {_form_preview} ({_date_preview}) — generating report with NVIDIA..."
-                else:
-                    spin_msg = "No SEC filing found — generating report with Haiku + web search..."
 
-            with st.spinner(spin_msg):
-                financials_text = format_financials_for_prompt(inc, bs, cf, years)
-                if _filing_text:
-                    report_text = generate_report_nvidia(
-                        company, ticker, financials_text, transcripts,
-                        _filing_text, _form_preview, _date_preview,
+            # Determine model and total stage count for progress display
+            _use_nvidia_gen = bool(_filing_text and not _has_suffix)
+            # NVIDIA path: 7 generation stages + 7 polish stages = 14
+            # Haiku path:  1 generation stage  + 7 polish stages = 8
+            _total_stages = 14 if _use_nvidia_gen else 8
+            _stage        = [0]  # mutable counter inside callbacks
+
+            def _next_stage(label, status_obj):
+                _stage[0] += 1
+                status_obj.write(f"**[{_stage[0]}/{_total_stages}]** {label}")
+
+            financials_text = format_financials_for_prompt(inc, bs, cf, years)
+
+            if _use_nvidia_gen:
+                _status_label = f"Generating report with NVIDIA — found {_form_preview} ({_date_preview})…"
+            else:
+                _status_label = (
+                    f"{ticker} is non-US listed — generating with Claude Haiku + web search…"
+                    if _has_suffix
+                    else "No SEC filing found — generating with Claude Haiku + web search…"
+                )
+
+            with st.status(_status_label, expanded=True) as _status:
+
+                def _on_section(idx, heading, total):
+                    short = heading.split(":")[0].strip()
+                    _next_stage(
+                        f"Generating section {idx} of {total}: {short}…",
+                        _status,
                     )
-                    model_used, form_used = "nvidia", _form_preview
+
+                def _on_polish(idx, heading, total):
+                    short = heading.split(":")[0].strip()
+                    _next_stage(
+                        f"Polishing section {idx} of {total}: {short}…",
+                        _status,
+                    )
+
+                if _use_nvidia_gen:
+                    report_text, model_used, form_used = generate_research_report(
+                        company, ticker, financials_text, transcripts,
+                        on_section=_on_section, on_polish=_on_polish,
+                    )
                 else:
-                    report_text = generate_report_haiku(company, ticker, financials_text, transcripts)
-                    model_used, form_used = "haiku", None
+                    # Haiku path — show a single generation stage before polling starts
+                    _next_stage(
+                        "Generating draft via Claude Haiku (searching the web)…",
+                        _status,
+                    )
+                    report_text, model_used, form_used = generate_research_report(
+                        company, ticker, financials_text, transcripts,
+                        on_polish=_on_polish,
+                    )
+
+                _status.update(label="Report complete — polishing finished.", state="complete")
 
             st.markdown("---")
             st.markdown(report_text)
