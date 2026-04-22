@@ -93,7 +93,7 @@ Rewrite the body now as polished, publication-ready prose — starting directly 
     )
 
 
-# Canonical section headings — used to normalise Haiku's varied output format
+# Canonical section headings — single source of truth used by both polish paths
 _CANONICAL_HEADINGS = [
     "1. THE FOUNDATION: BUSINESS OVERVIEW & TANGIBLE SCALE",
     "2. THE BATTLEFIELD: INDUSTRY LANDSCAPE & COMPETITIVE PROFILE",
@@ -104,58 +104,63 @@ _CANONICAL_HEADINGS = [
     "7. CATALYSTS & INFLECTION POINTS",
 ]
 
-# Maps a unique keyword to its canonical heading
-_KEYWORD_TO_CANONICAL = {
-    "THE FOUNDATION":    _CANONICAL_HEADINGS[0],
-    "THE BATTLEFIELD":   _CANONICAL_HEADINGS[1],
-    "THE GENERALS":      _CANONICAL_HEADINGS[2],
-    "THE CHOKEPOINTS":   _CANONICAL_HEADINGS[3],
-    "THE SCORECARD":     _CANONICAL_HEADINGS[4],
-    "THE ASYMMETRIC BET": _CANONICAL_HEADINGS[5],
-    "CATALYSTS":         _CANONICAL_HEADINGS[6],
-}
 
+def _reformat_haiku_report(raw_text, api_key, on_progress=None):
+    """Reformat the entire Haiku output in one NVIDIA call.
 
-def _keyword_split(report_text):
-    """Fallback splitter for Haiku output whose headings aren't strictly numbered.
-
-    Scans line-by-line for lines that are predominantly uppercase and contain a
-    known section keyword, then maps them to the canonical numbered heading.
-    Any text before the first recognised heading is discarded (meta-commentary).
+    Haiku's output is structurally unreliable — headings are fused with body
+    text on the same line, preamble meta-commentary precedes the first section,
+    and heading formats vary wildly.  Attempting to split it section-by-section
+    always fails.  Instead we send the full raw text to NVIDIA and instruct it
+    to strip preamble, restructure into exactly 7 numbered sections, and rewrite
+    as polished publication-ready prose.
     """
-    sections = []
-    current_canonical = None
-    current_body = []
+    if on_progress:
+        on_progress(1, "Reformatting and polishing full report", 1)
 
-    for line in report_text.split("\n"):
-        upper = line.upper()
-        matched_kw = None
-        for kw in _KEYWORD_TO_CANONICAL:
-            if kw in upper:
-                # Confirm the line is a heading (≥70 % of alpha chars are uppercase)
-                alpha = [c for c in line if c.isalpha()]
-                if alpha and sum(1 for c in alpha if c.isupper()) / len(alpha) >= 0.70:
-                    matched_kw = kw
-                    break
+    section_list = "\n".join(f"  {h}" for h in _CANONICAL_HEADINGS)
 
-        if matched_kw:
-            if current_canonical is not None:
-                sections.append((current_canonical, "\n".join(current_body).strip()))
-            current_canonical = _KEYWORD_TO_CANONICAL[matched_kw]
-            current_body = []
-        else:
-            if current_canonical is not None:   # silently discard pre-first-heading text
-                current_body.append(line)
+    prompt = f"""You are a professional investment research editor preparing a final deliverable for an investment committee.
 
-    if current_canonical is not None:
-        sections.append((current_canonical, "\n".join(current_body).strip()))
+The draft below is a research report that was written by an AI assistant. It contains meta-commentary preambles, inconsistent section headings, bullet points, broken lines, formulas written as equations, and backtick code formatting. Your job is to produce a clean, publication-ready version.
 
-    return sections
+INSTRUCTIONS — apply every rule without exception:
+
+1. REMOVE the preamble. Delete everything before the first section heading — any text such as "I will now research...", "Let me gather information...", "I now have sufficient research...", or similar AI commentary. The report must begin directly with the first section heading.
+
+2. RESTRUCTURE into exactly these 7 sections, using these exact headings on their own lines with nothing else on that line:
+{section_list}
+
+3. REWRITE each section body as continuous flowing prose:
+   - No bullet points, dashes as list markers, numbered sub-lists, or tables.
+   - No markdown characters: no **, no ##, no -, no >, no backticks.
+   - No arithmetic written out: never write "calculated as X divided by Y". State only the final result as a clean figure or percentage.
+   - Every paragraph minimum five sentences: a point, evidence, analysis, second-order implication, and a conclusion.
+
+4. PRESERVE every financial figure, citation (e.g. FY2024 Income Statement), and verbatim management quote exactly as it appears in the draft. Do not add information. Do not remove substantive content.
+
+5. OUTPUT FORMAT: begin your response directly with the first section heading. Do not write any preamble or meta-commentary.
+
+DRAFT REPORT:
+{raw_text}
+
+Write the complete reformatted report now:"""
+
+    result = _call_nvidia(
+        [{"role": "user", "content": prompt}],
+        api_key,
+        max_tokens=32000,
+    )
+    return result if result and result.strip() else raw_text
 
 
 def _polish_report(report_text, api_key, on_progress=None):
-    """Split the assembled report into sections and polish each through NVIDIA."""
-    # ── Step 1: try the strict numbered-heading regex (NVIDIA output format) ──
+    """Polish a report that was generated section-by-section (NVIDIA path).
+
+    Splits on the strict numbered-heading regex and sends each section body
+    to NVIDIA individually.  The heading is always prepended by this function
+    so the PDF splitter sees a guaranteed clean format.
+    """
     section_re = re.compile(r'(?m)^(\d+\.\s+[A-Z][A-Z\s&:,\-]+)$')
     parts      = section_re.split(report_text)
 
@@ -165,13 +170,8 @@ def _polish_report(report_text, api_key, on_progress=None):
         sections.append((parts[i].strip(), parts[i + 1].strip()))
         i += 2
 
-    # ── Step 2: if the strict regex found < 3 sections, fall back to keyword split
-    # (handles Haiku's "---. THE FOUNDATION:" / unnumbered heading formats)
-    if len(sections) < 3:
-        sections = _keyword_split(report_text)
-
     if not sections:
-        return report_text      # nothing recognised — return as-is
+        return report_text
 
     total          = len(sections)
     polished_parts = []
@@ -182,8 +182,6 @@ def _polish_report(report_text, api_key, on_progress=None):
 
         polished_body = _polish_section(heading, body, api_key)
         if polished_body and polished_body.strip():
-            # Always prepend heading ourselves — guarantees the PDF splitter
-            # sees a clean numbered heading on its own line every time.
             polished_parts.append(f"{heading}\n\n{polished_body.strip()}")
         else:
             polished_parts.append(f"{heading}\n\n{body}")
@@ -329,7 +327,7 @@ def generate_report_haiku(company_name, ticker, financials_text, transcripts,
         text_parts = [b["text"] for b in data["content"] if b.get("type") == "text"]
         assembled  = _clean_report("\n\n".join(text_parts))
         nvidia_key = st.secrets.get("NVIDIA_API_KEY", "")
-        return _polish_report(assembled, nvidia_key, on_progress=on_polish)
+        return _reformat_haiku_report(assembled, nvidia_key, on_progress=on_polish)
     except Exception as e:
         return f"Error generating report via Haiku: {e}"
 

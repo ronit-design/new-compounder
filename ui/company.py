@@ -1214,8 +1214,8 @@ def render_company(ticker, company):
             # Determine model and total stage count for progress display
             _use_nvidia_gen = bool(_filing_text and not _has_suffix)
             # NVIDIA path: 7 generation stages + 7 polish stages = 14
-            # Haiku path:  1 generation stage  + 7 polish stages = 8
-            _total_stages = 14 if _use_nvidia_gen else 8
+            # Haiku path:  1 generation stage  + 1 full reformat  = 2
+            _total_stages = 14 if _use_nvidia_gen else 2
             _stage        = [0]  # mutable counter inside callbacks
 
             def _next_stage(label, status_obj):
