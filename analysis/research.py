@@ -93,27 +93,85 @@ Rewrite the body now as polished, publication-ready prose — starting directly 
     )
 
 
+# Canonical section headings — used to normalise Haiku's varied output format
+_CANONICAL_HEADINGS = [
+    "1. THE FOUNDATION: BUSINESS OVERVIEW & TANGIBLE SCALE",
+    "2. THE BATTLEFIELD: INDUSTRY LANDSCAPE & COMPETITIVE PROFILE",
+    "3. THE GENERALS: MANAGEMENT, ALIGNMENT & TRACK RECORD",
+    "4. THE CHOKEPOINTS: CUSTOMER DYNAMICS & SUPPLY CHAIN",
+    "5. THE SCORECARD: FINANCIAL TRUTH & CAPITAL ALLOCATION",
+    "6. THE ASYMMETRIC BET: GROWTH RUNWAY & THE KILL SHOT",
+    "7. CATALYSTS & INFLECTION POINTS",
+]
+
+# Maps a unique keyword to its canonical heading
+_KEYWORD_TO_CANONICAL = {
+    "THE FOUNDATION":    _CANONICAL_HEADINGS[0],
+    "THE BATTLEFIELD":   _CANONICAL_HEADINGS[1],
+    "THE GENERALS":      _CANONICAL_HEADINGS[2],
+    "THE CHOKEPOINTS":   _CANONICAL_HEADINGS[3],
+    "THE SCORECARD":     _CANONICAL_HEADINGS[4],
+    "THE ASYMMETRIC BET": _CANONICAL_HEADINGS[5],
+    "CATALYSTS":         _CANONICAL_HEADINGS[6],
+}
+
+
+def _keyword_split(report_text):
+    """Fallback splitter for Haiku output whose headings aren't strictly numbered.
+
+    Scans line-by-line for lines that are predominantly uppercase and contain a
+    known section keyword, then maps them to the canonical numbered heading.
+    Any text before the first recognised heading is discarded (meta-commentary).
+    """
+    sections = []
+    current_canonical = None
+    current_body = []
+
+    for line in report_text.split("\n"):
+        upper = line.upper()
+        matched_kw = None
+        for kw in _KEYWORD_TO_CANONICAL:
+            if kw in upper:
+                # Confirm the line is a heading (≥70 % of alpha chars are uppercase)
+                alpha = [c for c in line if c.isalpha()]
+                if alpha and sum(1 for c in alpha if c.isupper()) / len(alpha) >= 0.70:
+                    matched_kw = kw
+                    break
+
+        if matched_kw:
+            if current_canonical is not None:
+                sections.append((current_canonical, "\n".join(current_body).strip()))
+            current_canonical = _KEYWORD_TO_CANONICAL[matched_kw]
+            current_body = []
+        else:
+            if current_canonical is not None:   # silently discard pre-first-heading text
+                current_body.append(line)
+
+    if current_canonical is not None:
+        sections.append((current_canonical, "\n".join(current_body).strip()))
+
+    return sections
+
+
 def _polish_report(report_text, api_key, on_progress=None):
     """Split the assembled report into sections and polish each through NVIDIA."""
-    # Match numbered section headings like "1. THE FOUNDATION: ..."
-    section_re = re.compile(
-        r'(?m)^(\d+\.\s+[A-Z][A-Z\s&:,\-]+)$'
-    )
-
-    parts = section_re.split(report_text)
-    # parts layout: [preamble, heading1, body1, heading2, body2, ...]
+    # ── Step 1: try the strict numbered-heading regex (NVIDIA output format) ──
+    section_re = re.compile(r'(?m)^(\d+\.\s+[A-Z][A-Z\s&:,\-]+)$')
+    parts      = section_re.split(report_text)
 
     sections = []
     i = 1
     while i < len(parts) - 1:
-        heading = parts[i].strip()
-        body    = parts[i + 1].strip()
-        sections.append((heading, body))
+        sections.append((parts[i].strip(), parts[i + 1].strip()))
         i += 2
 
+    # ── Step 2: if the strict regex found < 3 sections, fall back to keyword split
+    # (handles Haiku's "---. THE FOUNDATION:" / unnumbered heading formats)
+    if len(sections) < 3:
+        sections = _keyword_split(report_text)
+
     if not sections:
-        # Couldn't split — return original untouched
-        return report_text
+        return report_text      # nothing recognised — return as-is
 
     total          = len(sections)
     polished_parts = []
@@ -124,11 +182,10 @@ def _polish_report(report_text, api_key, on_progress=None):
 
         polished_body = _polish_section(heading, body, api_key)
         if polished_body and polished_body.strip():
-            # Always prepend the heading ourselves so it is guaranteed to be
-            # on its own line in the exact format the PDF splitter expects.
+            # Always prepend heading ourselves — guarantees the PDF splitter
+            # sees a clean numbered heading on its own line every time.
             polished_parts.append(f"{heading}\n\n{polished_body.strip()}")
         else:
-            # Fall back to original if NVIDIA returns nothing
             polished_parts.append(f"{heading}\n\n{body}")
 
     return "\n\n".join(polished_parts)
