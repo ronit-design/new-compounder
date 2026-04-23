@@ -301,7 +301,7 @@ def generate_report_haiku(company_name, ticker, financials_text, transcripts,
             "messages":   [{"role": "user", "content": prompt}],
         }
         r = requests.post("https://api.anthropic.com/v1/messages",
-                          headers=headers, json=payload, timeout=180)
+                          headers=headers, json=payload, timeout=300)
         r.raise_for_status()
         data = r.json()
 
@@ -320,7 +320,7 @@ def generate_report_haiku(company_name, ticker, financials_text, transcripts,
             r2 = requests.post("https://api.anthropic.com/v1/messages",
                                headers=headers,
                                json={**payload, "messages": messages},
-                               timeout=180)
+                               timeout=300)
             r2.raise_for_status()
             data = r2.json()
 
