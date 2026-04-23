@@ -1,7 +1,7 @@
 import requests
 
 
-def _call_nvidia(messages, api_key, max_tokens=32000):
+def _call_nvidia(messages, api_key, max_tokens=4000):
     r = requests.post(
         "https://integrate.api.nvidia.com/v1/chat/completions",
         headers={"Content-Type": "application/json",
@@ -13,7 +13,7 @@ def _call_nvidia(messages, api_key, max_tokens=32000):
             "top_p":       0.95,
             "messages":    messages,
         },
-        timeout=300,
+        timeout=600,
     )
     r.raise_for_status()
     msg = r.json()["choices"][0]["message"]

@@ -149,7 +149,7 @@ Write the complete reformatted report now:"""
     result = _call_nvidia(
         [{"role": "user", "content": prompt}],
         api_key,
-        max_tokens=32000,
+        max_tokens=16000,
     )
     return result if result and result.strip() else raw_text
 
