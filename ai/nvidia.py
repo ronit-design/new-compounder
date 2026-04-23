@@ -7,11 +7,10 @@ def _call_nvidia(messages, api_key, max_tokens=32000):
         headers={"Content-Type": "application/json",
                  "Authorization": f"Bearer {api_key}"},
         json={
-            "model":       "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+            "model":       "meta/llama-3.1-405b-instruct",
             "max_tokens":  max_tokens,
             "temperature": 0.6,
             "top_p":       0.95,
-            "chat_template_kwargs": {"thinking": True},
             "messages":    messages,
         },
         timeout=300,
