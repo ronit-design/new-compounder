@@ -90,7 +90,7 @@ Rewrite the body now as polished, publication-ready prose — starting directly 
     return _call_nvidia(
         [{"role": "user", "content": prompt}],
         api_key,
-        max_tokens=12000,
+        max_tokens=6000,
     )
 
 
