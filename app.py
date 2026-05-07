@@ -29,8 +29,8 @@ html, body, [class*="css"] {{
 #MainMenu, footer {{ display: none !important; }}
 .stDeployButton {{ display: none !important; }}
 [data-testid="stHeader"] {{ background: transparent !important; box-shadow: none !important; }}
-[data-testid="stToolbar"] {{ visibility: hidden !important; }}
-[data-testid="stSidebarCollapseButton"] {{ visibility: visible !important; }}
+[data-testid="stToolbarActionButton"] {{ display: none !important; }}
+[data-testid="stToolbar"] a {{ display: none !important; }}
 
 /* ── Main container ── */
 .block-container {{
