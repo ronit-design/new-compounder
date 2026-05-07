@@ -1,3 +1,4 @@
+import json
 import requests
 
 
@@ -18,6 +19,43 @@ def _call_nvidia(messages, api_key, max_tokens=6000):
     r.raise_for_status()
     msg = r.json()["choices"][0]["message"]
     return str(msg.get("content") or msg.get("reasoning_content") or msg.get("text") or "").strip()
+
+
+def _call_nvidia_stream(messages, api_key, max_tokens=6000):
+    """Generator — yields text tokens as they stream from the API."""
+    r = requests.post(
+        "https://integrate.api.nvidia.com/v1/chat/completions",
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Bearer {api_key}"},
+        json={
+            "model":       "minimaxai/minimax-m2.7",
+            "max_tokens":  max_tokens,
+            "temperature": 0.6,
+            "top_p":       0.95,
+            "messages":    messages,
+            "stream":      True,
+        },
+        timeout=600,
+        stream=True,
+    )
+    r.raise_for_status()
+    for line in r.iter_lines():
+        if not line:
+            continue
+        line_str = line.decode("utf-8") if isinstance(line, bytes) else line
+        if not line_str.startswith("data: "):
+            continue
+        data = line_str[6:]
+        if data.strip() == "[DONE]":
+            break
+        try:
+            chunk   = json.loads(data)
+            delta   = chunk["choices"][0]["delta"]
+            content = delta.get("content") or delta.get("reasoning_content") or ""
+            if content:
+                yield content
+        except (json.JSONDecodeError, KeyError, IndexError):
+            continue
 
 
 def _build_prompt(company_name, ticker, financials_text, transcript_text,

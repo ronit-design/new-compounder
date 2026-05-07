@@ -3,7 +3,7 @@ import requests
 import streamlit as st
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from ai.nvidia import _call_nvidia, _build_prompt
+from ai.nvidia import _call_nvidia, _call_nvidia_stream, _build_prompt
 from data.edgar import fetch_10k_text
 
 
@@ -201,7 +201,7 @@ def _polish_report(report_text, api_key, on_progress=None):
 
 def generate_report_nvidia(company_name, ticker, financials_text, transcripts,
                             filing_text, form_type, filing_date,
-                            on_section=None, on_polish=None):
+                            on_section=None, on_polish=None, on_stream=None):
     transcript_text = _format_transcripts(transcripts)
     filing_section  = (f"\n\n=== {form_type} FILING ({filing_date}) ===\n{filing_text[:60000]}"
                        if filing_text else "")
@@ -270,15 +270,47 @@ NOW WRITE ONLY THE FOLLOWING SECTION:
 
     try:
         section_map = {}
-        with ThreadPoolExecutor(max_workers=7) as pool:
-            futures = {pool.submit(_gen_section, (i, h, ins)): i
-                       for i, (h, ins) in enumerate(sections, 1)}
-            for fut in as_completed(futures):
-                sec_idx, heading, body = fut.result()
+
+        if on_stream:
+            # Sequential streaming path — yields tokens live to the UI
+            for sec_idx, (heading, instructions) in enumerate(sections, 1):
+                section_prompt = data_block + f"{heading}\n\n{instructions}"
+                accumulated = ""
+                token_count = 0
+                for token in _call_nvidia_stream(
+                    [{"role": "user", "content": section_prompt}], api_key
+                ):
+                    accumulated += token
+                    token_count += 1
+                    if token_count % 10 == 0:
+                        on_stream(heading, accumulated)
+                if accumulated:
+                    on_stream(heading, accumulated)
                 if on_section:
                     on_section(sec_idx, heading, total_sections)
+                text    = accumulated.strip()
+                sec_num = heading.split(".")[0].strip()
+                lines   = text.split("\n")
+                cleaned_lines = []
+                for line in lines:
+                    stripped = line.strip().lstrip("*#").strip()
+                    if re.match(rf"^{sec_num}[.\)]\s+", stripped):
+                        continue
+                    cleaned_lines.append(line)
+                body = "\n".join(cleaned_lines).strip().lstrip("\n").strip()
                 if body:
                     section_map[sec_idx] = (heading, body)
+        else:
+            # Parallel path — all 7 sections concurrently
+            with ThreadPoolExecutor(max_workers=7) as pool:
+                futures = {pool.submit(_gen_section, (i, h, ins)): i
+                           for i, (h, ins) in enumerate(sections, 1)}
+                for fut in as_completed(futures):
+                    sec_idx, heading, body = fut.result()
+                    if on_section:
+                        on_section(sec_idx, heading, total_sections)
+                    if body:
+                        section_map[sec_idx] = (heading, body)
 
         report_parts = [
             f"{heading}\n\n{body}"
@@ -353,7 +385,7 @@ def generate_report_haiku(company_name, ticker, financials_text, transcripts,
 # ── Router ─────────────────────────────────────────────────────────────────────
 
 def generate_research_report(company_name, ticker, financials_text, transcripts,
-                              web_context="", on_section=None, on_polish=None):
+                              web_context="", on_section=None, on_polish=None, on_stream=None):
     has_suffix = bool(re.search(r"[.][A-Z]{1,4}$", ticker.upper()))
 
     if has_suffix:
@@ -365,7 +397,8 @@ def generate_research_report(company_name, ticker, financials_text, transcripts,
     if filing_text:
         return (generate_report_nvidia(company_name, ticker, financials_text, transcripts,
                                        filing_text, form_type, filing_date,
-                                       on_section=on_section, on_polish=on_polish),
+                                       on_section=on_section, on_polish=on_polish,
+                                       on_stream=on_stream),
                 "nvidia", form_type)
 
     return (generate_report_haiku(company_name, ticker, financials_text, transcripts,

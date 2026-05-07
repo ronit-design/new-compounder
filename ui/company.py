@@ -1225,8 +1225,9 @@ def render_company(ticker, company):
                 _status_label = "No SEC filing found — generating with Claude Haiku + web search…"
 
             with st.status(_status_label, expanded=True) as _status:
-                _cur_text = st.empty()
-                _bar      = st.progress(0)
+                _cur_text    = st.empty()
+                _bar         = st.progress(0)
+                _stream_area = st.empty()
 
                 def _on_section(idx, heading, total):
                     _sections_done[0] += 1
@@ -1248,6 +1249,24 @@ def render_company(ticker, company):
                         unsafe_allow_html=True,
                     )
 
+                def _on_stream(heading, accumulated):
+                    short   = heading.split(":")[0].strip()
+                    display = accumulated[-2000:] if len(accumulated) > 2000 else accumulated
+                    escaped = (display
+                               .replace("&", "&amp;")
+                               .replace("<", "&lt;")
+                               .replace(">", "&gt;"))
+                    _stream_area.markdown(
+                        f'<div style="border:1px solid #e8e8e8;border-radius:6px;'
+                        f'padding:0.8rem 1rem;background:#fafafa;margin:0.4rem 0">'
+                        f'<div style="font-size:0.68rem;font-weight:500;color:#999;'
+                        f'text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.4rem">'
+                        f'{short}</div>'
+                        f'<div style="font-size:0.78rem;line-height:1.7;color:#333;'
+                        f'white-space:pre-wrap">{escaped}</div></div>',
+                        unsafe_allow_html=True,
+                    )
+
                 if not _use_nvidia_gen:
                     _cur_text.markdown(
                         '<span style="font-size:0.82rem;color:#555">'
@@ -1260,10 +1279,12 @@ def render_company(ticker, company):
                     company, ticker, financials_text, transcripts,
                     on_section=_on_section if _use_nvidia_gen else None,
                     on_polish=_on_polish,
+                    on_stream=_on_stream if _use_nvidia_gen else None,
                 )
 
                 _bar.progress(1.0)
                 _cur_text.empty()
+                _stream_area.empty()
                 _status.update(label="Report complete — polishing finished.", state="complete")
 
             st.markdown("---")
