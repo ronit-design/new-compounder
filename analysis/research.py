@@ -1,6 +1,7 @@
 import re
 import requests
 import streamlit as st
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ai.nvidia import _call_nvidia, _build_prompt
 from data.edgar import fetch_10k_text
@@ -173,20 +174,27 @@ def _polish_report(report_text, api_key, on_progress=None):
     if not sections:
         return report_text
 
-    total          = len(sections)
-    polished_parts = []
+    total        = len(sections)
+    polished_map = {}
 
-    for idx, (heading, body) in enumerate(sections, 1):
-        if on_progress:
-            on_progress(idx, heading, total)
+    def _polish_one(args):
+        idx, heading, body = args
+        result = _polish_section(heading, body, api_key)
+        return idx, heading, result if (result and result.strip()) else body
 
-        polished_body = _polish_section(heading, body, api_key)
-        if polished_body and polished_body.strip():
-            polished_parts.append(f"{heading}\n\n{polished_body.strip()}")
-        else:
-            polished_parts.append(f"{heading}\n\n{body}")
+    with ThreadPoolExecutor(max_workers=7) as pool:
+        futures = {pool.submit(_polish_one, (idx, h, b)): idx
+                   for idx, (h, b) in enumerate(sections, 1)}
+        for fut in as_completed(futures):
+            idx, heading, body = fut.result()
+            if on_progress:
+                on_progress(idx, heading, total)
+            polished_map[idx] = (heading, body)
 
-    return "\n\n".join(polished_parts)
+    return "\n\n".join(
+        f"{heading}\n\n{body}"
+        for _, (heading, body) in sorted(polished_map.items())
+    )
 
 
 # ── NVIDIA multi-section report ───────────────────────────────────────────────
@@ -241,31 +249,41 @@ NOW WRITE ONLY THE FOLLOWING SECTION:
     ]
 
     total_sections = len(sections)
+
+    def _gen_section(args):
+        sec_idx, heading, instructions = args
+        section_prompt = data_block + f"{heading}\n\n{instructions}"
+        text = _call_nvidia([{"role": "user", "content": section_prompt}], api_key)
+        if not text:
+            return sec_idx, heading, None
+        text    = text.strip()
+        sec_num = heading.split(".")[0].strip()
+        lines   = text.split("\n")
+        cleaned_lines = []
+        for line in lines:
+            stripped = line.strip().lstrip("*#").strip()
+            if re.match(rf"^{sec_num}[.\)]\s+", stripped):
+                continue
+            cleaned_lines.append(line)
+        body = "\n".join(cleaned_lines).strip().lstrip("\n").strip()
+        return sec_idx, heading, body or None
+
     try:
-        report_parts = []
-        for sec_idx, (heading, instructions) in enumerate(sections, 1):
-            if on_section:
-                on_section(sec_idx, heading, total_sections)
+        section_map = {}
+        with ThreadPoolExecutor(max_workers=7) as pool:
+            futures = {pool.submit(_gen_section, (i, h, ins)): i
+                       for i, (h, ins) in enumerate(sections, 1)}
+            for fut in as_completed(futures):
+                sec_idx, heading, body = fut.result()
+                if on_section:
+                    on_section(sec_idx, heading, total_sections)
+                if body:
+                    section_map[sec_idx] = (heading, body)
 
-            section_prompt = data_block + f"{heading}\n\n{instructions}"
-            text = _call_nvidia([{"role": "user", "content": section_prompt}], api_key)
-            if not text:
-                continue
-            text    = text.strip()
-            sec_num = heading.split(".")[0].strip()
-            lines   = text.split("\n")
-            cleaned_lines = []
-            for line in lines:
-                stripped = line.strip().lstrip("*#").strip()
-                if re.match(rf"^{sec_num}[.\)]\s+", stripped):
-                    continue
-                cleaned_lines.append(line)
-
-            body = "\n".join(cleaned_lines).strip().lstrip("\n").strip()
-            if not body:
-                continue
-
-            report_parts.append(f"{heading}\n\n{body}")
+        report_parts = [
+            f"{heading}\n\n{body}"
+            for _, (heading, body) in sorted(section_map.items())
+        ]
 
         if not report_parts:
             return "NVIDIA returned empty responses for all sections."
