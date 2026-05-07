@@ -1211,60 +1211,59 @@ def render_company(ticker, company):
                 with st.spinner("Searching EDGAR for 10-K / 20-F..."):
                     _filing_text, _form_preview, _date_preview = fetch_10k_text(ticker)
 
-            # Determine model and total stage count for progress display
             _use_nvidia_gen = bool(_filing_text and not _has_suffix)
-            # NVIDIA path: 7 generation stages + 7 polish stages = 14
-            # Haiku path:  1 generation stage  + 1 full reformat  = 2
-            _total_stages = 14 if _use_nvidia_gen else 2
-            _stage        = [0]  # mutable counter inside callbacks
-
-            def _next_stage(label, status_obj):
-                _stage[0] += 1
-                status_obj.write(f"**[{_stage[0]}/{_total_stages}]** {label}")
-
             financials_text = format_financials_for_prompt(inc, bs, cf, years)
 
+            _sections_done = [0]
+            _polish_done   = [0]
+
             if _use_nvidia_gen:
-                _status_label = f"Generating report with NVIDIA — found {_form_preview} ({_date_preview})…"
+                _status_label = f"Generating report — {_form_preview} ({_date_preview}) found…"
+            elif _has_suffix:
+                _status_label = f"{ticker} is non-US — generating with Claude Haiku + web search…"
             else:
-                _status_label = (
-                    f"{ticker} is non-US listed — generating with Claude Haiku + web search…"
-                    if _has_suffix
-                    else "No SEC filing found — generating with Claude Haiku + web search…"
-                )
+                _status_label = "No SEC filing found — generating with Claude Haiku + web search…"
 
             with st.status(_status_label, expanded=True) as _status:
+                _cur_text = st.empty()
+                _bar      = st.progress(0)
 
                 def _on_section(idx, heading, total):
+                    _sections_done[0] += 1
                     short = heading.split(":")[0].strip()
-                    _next_stage(
-                        f"Generating section {idx} of {total}: {short}…",
-                        _status,
+                    _bar.progress(_sections_done[0] / (total * 2))
+                    _cur_text.markdown(
+                        f'<span style="font-size:0.82rem;color:#555">'
+                        f'Generating {_sections_done[0]}/{total} — {short}</span>',
+                        unsafe_allow_html=True,
                     )
 
                 def _on_polish(idx, heading, total):
+                    _polish_done[0] += 1
                     short = heading.split(":")[0].strip()
-                    _next_stage(
-                        f"Polishing section {idx} of {total}: {short}…",
-                        _status,
+                    _bar.progress(0.5 + _polish_done[0] / (total * 2))
+                    _cur_text.markdown(
+                        f'<span style="font-size:0.82rem;color:#555">'
+                        f'Polishing {_polish_done[0]}/{total} — {short}</span>',
+                        unsafe_allow_html=True,
                     )
 
-                if _use_nvidia_gen:
-                    report_text, model_used, form_used = generate_research_report(
-                        company, ticker, financials_text, transcripts,
-                        on_section=_on_section, on_polish=_on_polish,
+                if not _use_nvidia_gen:
+                    _cur_text.markdown(
+                        '<span style="font-size:0.82rem;color:#555">'
+                        'Generating draft via Claude Haiku (searching the web)…</span>',
+                        unsafe_allow_html=True,
                     )
-                else:
-                    # Haiku path — show a single generation stage before polling starts
-                    _next_stage(
-                        "Generating draft via Claude Haiku (searching the web)…",
-                        _status,
-                    )
-                    report_text, model_used, form_used = generate_research_report(
-                        company, ticker, financials_text, transcripts,
-                        on_polish=_on_polish,
-                    )
+                    _bar.progress(0.1)
 
+                report_text, model_used, form_used = generate_research_report(
+                    company, ticker, financials_text, transcripts,
+                    on_section=_on_section if _use_nvidia_gen else None,
+                    on_polish=_on_polish,
+                )
+
+                _bar.progress(1.0)
+                _cur_text.empty()
                 _status.update(label="Report complete — polishing finished.", state="complete")
 
             st.markdown("---")
