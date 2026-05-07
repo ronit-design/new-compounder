@@ -31,25 +31,6 @@ html, body, [class*="css"] {{
 [data-testid="stToolbar"] {{ display: none !important; }}
 [data-testid="stHeader"] {{ background: transparent !important; box-shadow: none !important; }}
 
-/* ── Sidebar toggle — always visible, always dark ── */
-[data-testid="collapsedControl"],
-[data-testid="stSidebarCollapseButton"] {{
-    display: flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    color: {C_TEXT} !important;
-    background: rgba(255,255,255,0.85) !important;
-    border-radius: 4px !important;
-}}
-[data-testid="collapsedControl"] svg,
-[data-testid="stSidebarCollapseButton"] svg,
-[data-testid="collapsedControl"] svg path,
-[data-testid="stSidebarCollapseButton"] svg path {{
-    fill: {C_TEXT} !important;
-    stroke: {C_TEXT} !important;
-    color: {C_TEXT} !important;
-}}
-
 /* ── Main container ── */
 .block-container {{
     padding: 2.5rem 3rem 4rem 3rem !important;
