@@ -26,9 +26,11 @@ html, body, [class*="css"] {{
 }}
 
 /* ── Hide Streamlit chrome ── */
-#MainMenu, footer, header {{ display: none !important; }}
+#MainMenu, footer {{ display: none !important; }}
 .stDeployButton {{ display: none !important; }}
 [data-testid="stToolbar"] {{ display: none !important; }}
+[data-testid="stHeader"] {{ background: transparent !important; }}
+[data-testid="stHeader"] > *:not([data-testid="collapsedControl"]) {{ display: none !important; }}
 
 /* ── Main container ── */
 .block-container {{
