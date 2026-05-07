@@ -63,6 +63,47 @@ def _clean_report(text):
     return "\n\n".join(merged).strip()
 
 
+def _strip_model_reasoning(text):
+    """Remove chain-of-thought preamble that reasoning models sometimes prepend."""
+    if not text:
+        return text
+
+    # Strip XML-style thinking blocks (DeepSeek / some MiniMax variants)
+    text = re.sub(
+        r'<(?:think|thinking|reasoning)>[\s\S]*?</(?:think|thinking|reasoning)>\s*',
+        '', text, flags=re.IGNORECASE,
+    ).strip()
+    if not text:
+        return text
+
+    # Openers that signal the model is narrating its task rather than writing prose
+    _opener = re.compile(
+        r'^(?:the user wants?|let me |i need to|i\'ll |i will |now let me|'
+        r'ok(?:ay)?,?\s|actually,?\s|wait,?\s|looking at the draft|'
+        r'let\'s |i should|i\'m |i\'ve |first,?\s+(?:i|let)|'
+        r'i see[,\s]|i notice[,\s])',
+        re.IGNORECASE,
+    )
+    if not _opener.match(text):
+        return text
+
+    # Still-reasoning pattern applied to each paragraph's first line
+    _still_reasoning = re.compile(
+        r'^(?:i |let me |the user|actually,|wait,|ok,|okay,|'
+        r'first,?\s+i|second,|third,|fourth,|let\'s |i\'ll |i\'ve |i\'m |'
+        r'i see|i notice|i need|looking at|paragraph \d|rule \d|'
+        r'the (?:draft|editing rules?|section heading|requirement))',
+        re.IGNORECASE,
+    )
+    paras = [p.strip() for p in re.split(r'\n{2,}', text) if p.strip()]
+    for idx, para in enumerate(paras):
+        first_line = para.split('\n')[0].strip()
+        if not _still_reasoning.match(first_line) and len(para) > 80:
+            return '\n\n'.join(paras[idx:]).strip()
+
+    return text
+
+
 # ── Polish pass (runs after initial generation for both NVIDIA and Haiku) ─────
 
 def _polish_section(heading, body, api_key):
@@ -87,11 +128,26 @@ DRAFT SECTION BODY (section heading is "{heading}"):
 
 Rewrite the body now as polished, publication-ready prose — starting directly with the first paragraph:"""
 
-    return _call_nvidia(
-        [{"role": "user", "content": prompt}],
+    result = _call_nvidia(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "You are a professional investment research editor. "
+                    "Produce ONLY the rewritten prose content — nothing else. "
+                    "Do NOT output reasoning, task analysis, rule enumeration, "
+                    "meta-commentary, or any sentence that begins with 'I', 'Let me', "
+                    "'The user', 'OK', 'Actually', 'Wait', 'Now', or similar. "
+                    "Begin your response immediately with the first sentence of the "
+                    "polished investment research prose."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
         api_key,
         max_tokens=6000,
     )
+    return _strip_model_reasoning(result) if result else result
 
 
 # Canonical section headings — single source of truth used by both polish paths
@@ -148,10 +204,22 @@ DRAFT REPORT:
 Write the complete reformatted report now:"""
 
     result = _call_nvidia(
-        [{"role": "user", "content": prompt}],
+        [
+            {
+                "role": "system",
+                "content": (
+                    "You are a professional investment research editor. "
+                    "Output ONLY the reformatted report content. "
+                    "Do not produce reasoning, meta-commentary, or any text that "
+                    "discusses your approach. Begin immediately with the first section heading."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ],
         api_key,
         max_tokens=16000,
     )
+    result = _strip_model_reasoning(result) if result else result
     return result if result and result.strip() else raw_text
 
 
