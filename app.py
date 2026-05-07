@@ -31,9 +31,18 @@ html, body, [class*="css"] {{
 [data-testid="stToolbar"] {{ display: none !important; }}
 [data-testid="stHeader"] {{ background: transparent !important; box-shadow: none !important; }}
 
-/* ── Sidebar toggle — force dark so it's visible on white bg in dark mode ── */
-[data-testid="collapsedControl"] svg {{ fill: {C_TEXT} !important; stroke: {C_TEXT} !important; }}
-[data-testid="stSidebarCollapseButton"] svg {{ fill: {C_TEXT} !important; stroke: {C_TEXT} !important; }}
+/* ── Sidebar toggle — always visible, always dark ── */
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapseButton"] {{
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}}
+[data-testid="collapsedControl"] svg,
+[data-testid="stSidebarCollapseButton"] svg {{
+    fill: {C_TEXT} !important;
+    stroke: {C_TEXT} !important;
+}}
 
 /* ── Main container ── */
 .block-container {{
