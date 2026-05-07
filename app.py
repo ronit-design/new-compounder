@@ -28,8 +28,8 @@ html, body, [class*="css"] {{
 /* ── Hide Streamlit chrome ── */
 #MainMenu, footer {{ display: none !important; }}
 .stDeployButton {{ display: none !important; }}
-[data-testid="stToolbar"] {{ display: none !important; }}
 [data-testid="stHeader"] {{ background: transparent !important; box-shadow: none !important; }}
+[data-testid="stToolbarActionButton"] {{ display: none !important; }}
 
 /* ── Main container ── */
 .block-container {{
