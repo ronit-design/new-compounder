@@ -49,11 +49,6 @@ html, body, [class*="css"] {{
     stroke: {C_TEXT} !important;
     color: {C_TEXT} !important;
 }}
-/* ── Catch-all: force all button SVGs dark on white bg ── */
-button svg, button svg path {{
-    fill: {C_TEXT} !important;
-    stroke: {C_TEXT} !important;
-}}
 
 /* ── Main container ── */
 .block-container {{
