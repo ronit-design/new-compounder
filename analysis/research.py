@@ -64,7 +64,13 @@ def _clean_report(text):
 
 
 def _strip_model_reasoning(text):
-    """Remove chain-of-thought preamble that reasoning models sometimes prepend."""
+    """Remove chain-of-thought reasoning from model output.
+
+    Handles two patterns:
+    1. Prefix reasoning — the model narrates the task before writing prose.
+    2. Interspersed reasoning — the model inserts mid-paragraph commentary
+       (e.g. "I'm examining the draft's structure…") between prose paragraphs.
+    """
     if not text:
         return text
 
@@ -76,32 +82,50 @@ def _strip_model_reasoning(text):
     if not text:
         return text
 
-    # Openers that signal the model is narrating its task rather than writing prose
-    _opener = re.compile(
-        r'^(?:the user wants?|let me |i need to|i\'ll |i will |now let me|'
-        r'ok(?:ay)?,?\s|actually,?\s|wait,?\s|looking at the draft|'
-        r'let\'s |i should|i\'m |i\'ve |first,?\s+(?:i|let)|'
-        r'i see[,\s]|i notice[,\s])',
+    # Pattern that matches any paragraph whose first line is clearly model narration.
+    # Investment research prose does not start with "I ", "Let me", etc.
+    _is_reasoning_para = re.compile(
+        r'^(?:'
+        r'i |'                               # "I examined…", "I see…", "I need…"
+        r'let me |'                          # "Let me analyze…"
+        r'the user wants?|'                  # "The user wants me to…"
+        r'actually,?\s|'
+        r'wait,?\s|'
+        r'ok(?:ay)?,?\s|'
+        r'now,?\s+(?:let|i)|'
+        r'first,?\s+(?:i|let)|'
+        r'second,\s|third,\s|fourth,\s|'
+        r'let\'s |'
+        r'i should|i\'m |i\'ve |i\'ll |i will |'
+        r'looking at(?: the)?(?: draft)?|'
+        r'paragraph \d+[:\.]|'
+        r'rule \d+[:\.]|'
+        r'the (?:draft|editing rules?|section heading|requirement)'
+        r')',
         re.IGNORECASE,
     )
-    if not _opener.match(text):
-        return text
 
-    # Still-reasoning pattern applied to each paragraph's first line
-    _still_reasoning = re.compile(
-        r'^(?:i |let me |the user|actually,|wait,|ok,|okay,|'
-        r'first,?\s+i|second,|third,|fourth,|let\'s |i\'ll |i\'ve |i\'m |'
-        r'i see|i notice|i need|looking at|paragraph \d|rule \d|'
-        r'the (?:draft|editing rules?|section heading|requirement))',
-        re.IGNORECASE,
-    )
     paras = [p.strip() for p in re.split(r'\n{2,}', text) if p.strip()]
-    for idx, para in enumerate(paras):
-        first_line = para.split('\n')[0].strip()
-        if not _still_reasoning.match(first_line) and len(para) > 80:
-            return '\n\n'.join(paras[idx:]).strip()
 
-    return text
+    # --- Phase 1: skip leading reasoning paragraphs to find prose start ---
+    prose_start = 0
+    first_line_0 = paras[0].split('\n')[0].strip() if paras else ''
+    if _is_reasoning_para.match(first_line_0):
+        for idx, para in enumerate(paras):
+            first_line = para.split('\n')[0].strip()
+            if not _is_reasoning_para.match(first_line) and len(para) > 80:
+                prose_start = idx
+                break
+
+    # --- Phase 2: drop any interspersed reasoning paragraphs in the prose ---
+    result = []
+    for para in paras[prose_start:]:
+        first_line = para.split('\n')[0].strip()
+        if _is_reasoning_para.match(first_line):
+            continue   # skip mid-content reasoning paragraph
+        result.append(para)
+
+    return '\n\n'.join(result).strip() if result else text
 
 
 # ── Polish pass (runs after initial generation for both NVIDIA and Haiku) ─────
