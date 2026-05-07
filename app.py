@@ -37,9 +37,20 @@ html, body, [class*="css"] {{
     display: flex !important;
     visibility: visible !important;
     opacity: 1 !important;
+    color: {C_TEXT} !important;
+    background: rgba(255,255,255,0.85) !important;
+    border-radius: 4px !important;
 }}
 [data-testid="collapsedControl"] svg,
-[data-testid="stSidebarCollapseButton"] svg {{
+[data-testid="stSidebarCollapseButton"] svg,
+[data-testid="collapsedControl"] svg path,
+[data-testid="stSidebarCollapseButton"] svg path {{
+    fill: {C_TEXT} !important;
+    stroke: {C_TEXT} !important;
+    color: {C_TEXT} !important;
+}}
+/* ── Catch-all: force all button SVGs dark on white bg ── */
+button svg, button svg path {{
     fill: {C_TEXT} !important;
     stroke: {C_TEXT} !important;
 }}
