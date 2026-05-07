@@ -1,7 +1,7 @@
 import requests
 
 
-def _call_nvidia(messages, api_key, max_tokens=4000):
+def _call_nvidia(messages, api_key, max_tokens=12000):
     r = requests.post(
         "https://integrate.api.nvidia.com/v1/chat/completions",
         headers={"Content-Type": "application/json",
