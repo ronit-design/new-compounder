@@ -29,13 +29,10 @@ html, body, [class*="css"] {{
 #MainMenu, footer {{ display: none !important; }}
 .stDeployButton {{ display: none !important; }}
 [data-testid="stToolbar"] {{ display: none !important; }}
-[data-testid="stHeader"] {{ background: transparent !important; }}
-[data-testid="stHeader"] > *:not([data-testid="collapsedControl"]) {{ display: none !important; }}
+[data-testid="stHeader"] {{ background: transparent !important; box-shadow: none !important; }}
 
 /* ── Sidebar toggle — force dark so it's visible on white bg in dark mode ── */
-[data-testid="collapsedControl"] {{ color: {C_TEXT} !important; }}
 [data-testid="collapsedControl"] svg {{ fill: {C_TEXT} !important; stroke: {C_TEXT} !important; }}
-[data-testid="stSidebarCollapseButton"] {{ color: {C_TEXT} !important; }}
 [data-testid="stSidebarCollapseButton"] svg {{ fill: {C_TEXT} !important; stroke: {C_TEXT} !important; }}
 
 /* ── Main container ── */
