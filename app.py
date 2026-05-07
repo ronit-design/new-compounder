@@ -32,6 +32,12 @@ html, body, [class*="css"] {{
 [data-testid="stHeader"] {{ background: transparent !important; }}
 [data-testid="stHeader"] > *:not([data-testid="collapsedControl"]) {{ display: none !important; }}
 
+/* ── Sidebar toggle — force dark so it's visible on white bg in dark mode ── */
+[data-testid="collapsedControl"] {{ color: {C_TEXT} !important; }}
+[data-testid="collapsedControl"] svg {{ fill: {C_TEXT} !important; stroke: {C_TEXT} !important; }}
+[data-testid="stSidebarCollapseButton"] {{ color: {C_TEXT} !important; }}
+[data-testid="stSidebarCollapseButton"] svg {{ fill: {C_TEXT} !important; stroke: {C_TEXT} !important; }}
+
 /* ── Main container ── */
 .block-container {{
     padding: 2.5rem 3rem 4rem 3rem !important;
